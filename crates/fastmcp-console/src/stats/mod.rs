@@ -2,6 +2,10 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod renderer;
+
+pub use renderer::StatsRenderer;
+
 /// Thread-safe server statistics collector.
 #[derive(Debug, Clone)]
 pub struct ServerStats {
