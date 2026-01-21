@@ -3,6 +3,8 @@
 //! Provides beautiful table displays for tools, resources, and prompts
 //! using rich_rust, with plain-text fallback for agent contexts.
 
+use std::collections::HashMap;
+
 use fastmcp_protocol::{Prompt, PromptArgument, Resource, Tool};
 use rich_rust::prelude::*;
 use rich_rust::r#box::ROUNDED;
@@ -344,12 +346,13 @@ impl ResourceTableRenderer {
         for resource in resources {
             let desc = resource.description.as_deref().unwrap_or("-");
             let truncated_desc = self.truncate_description(desc);
+            let formatted_uri = self.format_uri(&resource.uri);
 
             if self.show_mime_type {
                 let mime = resource.mime_type.as_deref().unwrap_or("-");
-                table.add_row_cells([resource.name.as_str(), resource.uri.as_str(), truncated_desc.as_str(), mime]);
+                table.add_row_cells([resource.name.as_str(), formatted_uri.as_str(), truncated_desc.as_str(), mime]);
             } else {
-                table.add_row_cells([resource.name.as_str(), resource.uri.as_str(), truncated_desc.as_str()]);
+                table.add_row_cells([resource.name.as_str(), formatted_uri.as_str(), truncated_desc.as_str()]);
             }
         }
 
@@ -364,13 +367,136 @@ impl ResourceTableRenderer {
         }
 
         console.print(&format!("\n[bold cyan]{}[/]", resource.name));
-        console.print(&format!("[dim]URI:[/] {}", resource.uri));
+        console.print(&format!(
+            "[dim]URI:[/] {}",
+            self.format_uri(&resource.uri)
+        ));
         console.print(&format!(
             "[dim]Description:[/] {}",
             resource.description.as_deref().unwrap_or("No description")
         ));
         if let Some(mime) = &resource.mime_type {
             console.print(&format!("[dim]MIME Type:[/] {}", mime));
+        }
+    }
+
+    /// Render resources as a tree grouped by URI prefix/scheme.
+    ///
+    /// Resources are grouped by their URI scheme (file://, config://, db://, etc.)
+    /// and displayed in a hierarchical tree structure.
+    pub fn render_tree(&self, resources: &[Resource], console: &FastMcpConsole) {
+        if resources.is_empty() {
+            if self.should_use_rich(console) {
+                console.print("[dim]No resources registered[/]");
+            } else {
+                console.print("No resources registered");
+            }
+            return;
+        }
+
+        if !self.should_use_rich(console) {
+            self.render_plain(resources, console);
+            return;
+        }
+
+        // Group resources by URI scheme/prefix
+        let mut groups: HashMap<String, Vec<&Resource>> = HashMap::new();
+        for resource in resources {
+            let prefix = self.extract_uri_prefix(&resource.uri);
+            groups.entry(prefix).or_default().push(resource);
+        }
+
+        // Build tree
+        let root = TreeNode::with_icon(
+            "📄",
+            format!("[bold]Resources[/] ({})", resources.len()),
+        );
+
+        // Sort group keys for consistent ordering
+        let mut sorted_keys: Vec<_> = groups.keys().cloned().collect();
+        sorted_keys.sort();
+
+        let root = sorted_keys.into_iter().fold(root, |root, prefix| {
+            let group_resources = groups.get(&prefix).unwrap();
+            let group_node = TreeNode::new(format!(
+                "[cyan]{}[/] ({})",
+                prefix,
+                group_resources.len()
+            ));
+
+            // Add each resource as a child
+            let group_node = group_resources.iter().fold(group_node, |node, resource| {
+                let name_part = self.extract_uri_path(&resource.uri);
+                let desc = self.truncate_description(
+                    resource.description.as_deref().unwrap_or(""),
+                );
+                let leaf_label = if desc.is_empty() {
+                    self.format_uri(&name_part)
+                } else {
+                    format!("{} [dim]- {}[/]", self.format_uri(&name_part), desc)
+                };
+                node.child(TreeNode::new(leaf_label))
+            });
+
+            root.child(group_node)
+        });
+
+        let tree = Tree::new(root).guides(TreeGuides::Rounded);
+        console.render(&tree);
+    }
+
+    /// Format a URI with template parts highlighted in yellow.
+    ///
+    /// Template parts like `{path}` or `{id}` are highlighted to make
+    /// them visually distinct from static URI parts.
+    fn format_uri(&self, uri: &str) -> String {
+        if !uri.contains('{') {
+            return uri.to_string();
+        }
+
+        // Highlight template placeholders {name} in yellow
+        let mut result = String::new();
+        let mut chars = uri.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c == '{' {
+                result.push_str("[yellow]{");
+                // Consume until closing brace
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    result.push(next);
+                    if next == '}' {
+                        result.push_str("[/]");
+                        break;
+                    }
+                }
+            } else {
+                result.push(c);
+            }
+        }
+
+        result
+    }
+
+    /// Extract the URI scheme/prefix (e.g., "file", "config", "db").
+    fn extract_uri_prefix(&self, uri: &str) -> String {
+        if let Some(idx) = uri.find("://") {
+            uri[..idx].to_string()
+        } else if let Some(idx) = uri.find(':') {
+            uri[..idx].to_string()
+        } else {
+            "other".to_string()
+        }
+    }
+
+    /// Extract the path portion of a URI after the scheme.
+    fn extract_uri_path(&self, uri: &str) -> String {
+        if let Some(idx) = uri.find("://") {
+            uri[idx + 3..].to_string()
+        } else if let Some(idx) = uri.find(':') {
+            uri[idx + 1..].to_string()
+        } else {
+            uri.to_string()
         }
     }
 
@@ -843,5 +969,100 @@ mod tests {
             renderer.truncate_description("This is a very long description that should be truncated"),
             "This is a very lo..."
         );
+    }
+
+    #[test]
+    fn test_uri_template_highlighting() {
+        let renderer = ResourceTableRenderer::new(DisplayContext::new_human());
+
+        // No template - unchanged
+        assert_eq!(
+            renderer.format_uri("file://config.json"),
+            "file://config.json"
+        );
+
+        // Simple template
+        assert_eq!(
+            renderer.format_uri("file://{path}"),
+            "file://[yellow]{path}[/]"
+        );
+
+        // Multiple templates
+        assert_eq!(
+            renderer.format_uri("db://{table}/{id}"),
+            "db://[yellow]{table}[/]/[yellow]{id}[/]"
+        );
+
+        // Template in the middle
+        assert_eq!(
+            renderer.format_uri("api://users/{id}/profile"),
+            "api://users/[yellow]{id}[/]/profile"
+        );
+    }
+
+    #[test]
+    fn test_uri_prefix_extraction() {
+        let renderer = ResourceTableRenderer::new(DisplayContext::new_agent());
+
+        assert_eq!(renderer.extract_uri_prefix("file://path"), "file");
+        assert_eq!(renderer.extract_uri_prefix("db://table"), "db");
+        assert_eq!(renderer.extract_uri_prefix("config:settings"), "config");
+        assert_eq!(renderer.extract_uri_prefix("no-scheme"), "other");
+    }
+
+    #[test]
+    fn test_uri_path_extraction() {
+        let renderer = ResourceTableRenderer::new(DisplayContext::new_agent());
+
+        assert_eq!(renderer.extract_uri_path("file://config.json"), "config.json");
+        assert_eq!(renderer.extract_uri_path("db://users/{id}"), "users/{id}");
+        assert_eq!(renderer.extract_uri_path("config:settings"), "settings");
+    }
+
+    fn sample_resources_with_templates() -> Vec<Resource> {
+        vec![
+            Resource {
+                uri: "file://{path}".to_string(),
+                name: "file".to_string(),
+                description: Some("Read file contents".to_string()),
+                mime_type: None,
+            },
+            Resource {
+                uri: "file://config.json".to_string(),
+                name: "config".to_string(),
+                description: Some("Application config".to_string()),
+                mime_type: Some("application/json".to_string()),
+            },
+            Resource {
+                uri: "db://users/{id}".to_string(),
+                name: "user".to_string(),
+                description: Some("User record by ID".to_string()),
+                mime_type: None,
+            },
+            Resource {
+                uri: "cache://stats".to_string(),
+                name: "stats".to_string(),
+                description: Some("Cached statistics".to_string()),
+                mime_type: None,
+            },
+        ]
+    }
+
+    #[test]
+    fn test_resource_tree_render_plain() {
+        let resources = sample_resources_with_templates();
+        let console = TestConsole::new();
+        let renderer = ResourceTableRenderer::new(DisplayContext::new_agent());
+        // Tree falls back to plain render in agent mode
+        renderer.render_tree(&resources, console.console());
+        console.assert_contains("Registered Resources (4)");
+    }
+
+    #[test]
+    fn test_resource_tree_empty() {
+        let console = TestConsole::new();
+        let renderer = ResourceTableRenderer::new(DisplayContext::new_agent());
+        renderer.render_tree(&[], console.console());
+        console.assert_contains("No resources registered");
     }
 }
