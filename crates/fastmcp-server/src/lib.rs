@@ -128,6 +128,17 @@ impl Server {
         self.stats.as_ref()
     }
 
+    /// Renders a stats panel to stderr, if stats are enabled.
+    pub fn display_stats(&self) {
+        let Some(stats) = self.stats.as_ref() else {
+            return;
+        };
+
+        let snapshot = stats.snapshot();
+        let renderer = fastmcp_console::stats::StatsRenderer::detect();
+        renderer.render_panel(&snapshot, console());
+    }
+
     /// Runs the server on stdio transport.
     ///
     /// This is the primary way to run MCP servers as subprocesses.
@@ -213,6 +224,14 @@ impl Server {
             // Handle the message
             let response = match message {
                 JsonRpcMessage::Request(request) => {
+                    // Track bytes received (approximate from serialized request size)
+                    if let Some(ref stats) = self.stats {
+                        // Estimate request size by serializing back to JSON
+                        // This is approximate but accurate enough for statistics
+                        if let Ok(json) = serde_json::to_string(&request) {
+                            stats.add_bytes_received(json.len() as u64 + 1); // +1 for newline
+                        }
+                    }
                     self.handle_request(cx, &mut session, request, &notification_sender)
                 }
                 JsonRpcMessage::Response(_) => {
@@ -220,6 +239,13 @@ impl Server {
                     continue;
                 }
             };
+
+            // Track bytes sent (approximate from serialized response size)
+            if let Some(ref stats) = self.stats {
+                if let Ok(json) = serde_json::to_string(&response) {
+                    stats.add_bytes_sent(json.len() as u64 + 1); // +1 for newline
+                }
+            }
 
             // Send response
             if let Err(e) = transport.send(cx, &JsonRpcMessage::Response(response)) {
