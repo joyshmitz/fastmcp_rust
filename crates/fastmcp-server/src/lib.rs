@@ -35,6 +35,7 @@ mod session;
 mod tests;
 
 pub use builder::ServerBuilder;
+pub use fastmcp_console::stats::{ServerStats, StatsSnapshot};
 pub use handler::{
     BoxFuture, ProgressNotificationSender, PromptHandler, ResourceHandler, ToolHandler,
     create_context_with_progress,
@@ -44,6 +45,7 @@ pub use session::Session;
 
 use std::io::Write;
 use std::sync::Arc;
+use std::time::Instant;
 
 use asupersync::{Budget, Cx};
 use fastmcp_console::{banner::StartupBanner, console};
@@ -67,6 +69,8 @@ pub struct Server {
     instructions: Option<String>,
     /// Request timeout in seconds (0 = no timeout).
     request_timeout_secs: u64,
+    /// Runtime statistics collector (None = disabled).
+    stats: Option<ServerStats>,
 }
 
 impl Server {
@@ -107,6 +111,23 @@ impl Server {
         self.router.prompts()
     }
 
+    /// Returns a point-in-time snapshot of server statistics.
+    ///
+    /// Returns `None` if statistics collection is disabled.
+    #[must_use]
+    pub fn stats(&self) -> Option<StatsSnapshot> {
+        self.stats.as_ref().map(|s| s.snapshot())
+    }
+
+    /// Returns the raw statistics collector.
+    ///
+    /// Useful for advanced scenarios where you need direct access.
+    /// Returns `None` if statistics collection is disabled.
+    #[must_use]
+    pub fn stats_collector(&self) -> Option<&ServerStats> {
+        self.stats.as_ref()
+    }
+
     /// Runs the server on stdio transport.
     ///
     /// This is the primary way to run MCP servers as subprocesses.
@@ -123,6 +144,11 @@ impl Server {
     pub fn run_stdio_with_cx(self, cx: &Cx) -> ! {
         let mut transport = StdioTransport::stdio();
         let mut session = Session::new(self.info.clone(), self.capabilities.clone());
+
+        // Track connection opened (stdio counts as a single connection)
+        if let Some(ref stats) = self.stats {
+            stats.connection_opened();
+        }
 
         if !banner_suppressed() {
             let render_banner = || {
@@ -155,6 +181,9 @@ impl Server {
             // Check for cancellation
             if cx.is_cancel_requested() {
                 info!(target: targets::SERVER, "Cancellation requested, shutting down");
+                if let Some(ref stats) = self.stats {
+                    stats.connection_closed();
+                }
                 std::process::exit(0);
             }
 
@@ -162,11 +191,17 @@ impl Server {
             let message = match transport.recv(cx) {
                 Ok(msg) => msg,
                 Err(TransportError::Closed) => {
-                    // Clean shutdown
+                    // Clean shutdown - track connection close
+                    if let Some(ref stats) = self.stats {
+                        stats.connection_closed();
+                    }
                     std::process::exit(0);
                 }
                 Err(TransportError::Cancelled) => {
                     info!(target: targets::SERVER, "Transport cancelled");
+                    if let Some(ref stats) = self.stats {
+                        stats.connection_closed();
+                    }
                     std::process::exit(0);
                 }
                 Err(e) => {
@@ -202,6 +237,10 @@ impl Server {
         notification_sender: &NotificationSender,
     ) -> JsonRpcResponse {
         let id = request.id.clone();
+        let method = request.method.clone();
+
+        // Start timing for stats
+        let start_time = Instant::now();
 
         // Generate internal request ID for tracing
         let request_id = request_id_to_u64(id.as_ref());
@@ -211,6 +250,10 @@ impl Server {
 
         // Check if budget is already exhausted (should not happen, but be defensive)
         if budget.is_exhausted() {
+            // Record failed request due to exhausted budget
+            if let Some(ref stats) = self.stats {
+                stats.record_request(&method, start_time.elapsed(), false);
+            }
             return JsonRpcResponse::error(
                 id,
                 JsonRpcError {
@@ -225,12 +268,24 @@ impl Server {
         let result = self.dispatch_method(
             cx,
             session,
-            &request.method,
+            &method,
             request.params,
             request_id,
             &budget,
             notification_sender,
         );
+
+        // Record statistics
+        let latency = start_time.elapsed();
+        if let Some(ref stats) = self.stats {
+            match &result {
+                Ok(_) => stats.record_request(&method, latency, true),
+                Err(e) if e.code == fastmcp_core::McpErrorCode::RequestCancelled => {
+                    stats.record_cancelled(&method, latency);
+                }
+                Err(_) => stats.record_request(&method, latency, false),
+            }
+        }
 
         // For success, we need a non-None id; use a fallback for notifications
         let response_id = id.clone().unwrap_or(RequestId::Number(0));

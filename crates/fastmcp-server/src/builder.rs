@@ -1,5 +1,6 @@
 //! Server builder for configuring MCP servers.
 
+use fastmcp_console::stats::ServerStats;
 use fastmcp_protocol::{
     PromptsCapability, ResourcesCapability, ServerCapabilities, ServerInfo, ToolsCapability,
 };
@@ -17,10 +18,15 @@ pub struct ServerBuilder {
     instructions: Option<String>,
     /// Request timeout in seconds (0 = no timeout).
     request_timeout_secs: u64,
+    /// Whether to enable statistics collection.
+    stats_enabled: bool,
 }
 
 impl ServerBuilder {
     /// Creates a new server builder.
+    ///
+    /// Statistics collection is enabled by default. Use [`without_stats`](Self::without_stats)
+    /// to disable it for performance-critical scenarios.
     #[must_use]
     pub fn new(name: impl Into<String>, version: impl Into<String>) -> Self {
         Self {
@@ -32,7 +38,20 @@ impl ServerBuilder {
             router: Router::new(),
             instructions: None,
             request_timeout_secs: DEFAULT_REQUEST_TIMEOUT_SECS,
+            stats_enabled: true,
         }
+    }
+
+    /// Disables statistics collection.
+    ///
+    /// Use this for performance-critical scenarios where the overhead
+    /// of atomic operations for stats tracking is undesirable.
+    /// The overhead is minimal (typically nanoseconds per request),
+    /// so this is rarely needed.
+    #[must_use]
+    pub fn without_stats(mut self) -> Self {
+        self.stats_enabled = false;
+        self
     }
 
     /// Sets the request timeout in seconds.
@@ -85,6 +104,11 @@ impl ServerBuilder {
             router: self.router,
             instructions: self.instructions,
             request_timeout_secs: self.request_timeout_secs,
+            stats: if self.stats_enabled {
+                Some(ServerStats::new())
+            } else {
+                None
+            },
         }
     }
 }

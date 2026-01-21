@@ -4,9 +4,9 @@
 
 use std::time::Duration;
 
+use rich_rust::r#box::ROUNDED;
 use rich_rust::markup;
 use rich_rust::prelude::*;
-use rich_rust::r#box::ROUNDED;
 
 use crate::console::FastMcpConsole;
 use crate::detection::DisplayContext;
@@ -84,10 +84,7 @@ impl StatsRenderer {
         ]));
         table.add_row(Row::new(vec![
             Cell::new("Success Rate"),
-            Cell::new(self.format_percentage(
-                stats.successful_requests,
-                stats.total_requests,
-            )),
+            Cell::new(self.format_percentage(stats.successful_requests, stats.total_requests)),
         ]));
         table.add_row(Row::new(vec![
             Cell::new("Failed Requests"),

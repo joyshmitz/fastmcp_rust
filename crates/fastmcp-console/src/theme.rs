@@ -3,6 +3,7 @@
 use rich_rust::prelude::*;
 
 /// FastMCP color palette
+#[derive(Debug)]
 pub struct FastMcpTheme {
     // Primary colors
     pub primary: Color,   // Vibrant cyan (#00d4ff)
