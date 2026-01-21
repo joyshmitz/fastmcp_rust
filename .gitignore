@@ -46,3 +46,6 @@ Desktop.ini
 lcov.info
 tarpaulin-report.html
 coverage/
+
+# NTM agent coordination
+.ntm/
