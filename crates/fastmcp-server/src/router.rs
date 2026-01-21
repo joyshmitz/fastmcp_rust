@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use asupersync::{Budget, Cx};
-use fastmcp_core::logging::{debug, trace, targets};
+use fastmcp_core::logging::{debug, targets, trace};
 use fastmcp_core::{McpContext, McpError, McpResult, block_on};
 use fastmcp_protocol::{
     CallToolParams, CallToolResult, Content, GetPromptParams, GetPromptResult, InitializeParams,

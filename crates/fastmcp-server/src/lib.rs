@@ -51,15 +51,15 @@ use std::time::Instant;
 use asupersync::{Budget, Cx};
 use fastmcp_console::logging::RichLoggerBuilder;
 use fastmcp_console::{banner::StartupBanner, console};
-use fastmcp_core::logging::{error, info, targets};
 use fastmcp_core::McpError;
-use log::Level;
+use fastmcp_core::logging::{error, info, targets};
 use fastmcp_protocol::{
     CallToolParams, GetPromptParams, InitializeParams, JsonRpcError, JsonRpcMessage,
     JsonRpcRequest, JsonRpcResponse, ListPromptsParams, ListResourcesParams, ListToolsParams,
     Prompt, ReadResourceParams, RequestId, Resource, ServerCapabilities, ServerInfo, Tool,
 };
 use fastmcp_transport::{Codec, StdioTransport, Transport, TransportError};
+use log::Level;
 
 /// Logging configuration for the server.
 #[derive(Debug, Clone)]

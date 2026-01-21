@@ -955,9 +955,7 @@ mod console_config_tests {
 
     #[test]
     fn test_server_with_periodic_stats() {
-        let server = Server::new("test", "1.0.0")
-            .with_periodic_stats(30)
-            .build();
+        let server = Server::new("test", "1.0.0").with_periodic_stats(30).build();
 
         assert!(server.console_config().show_stats_periodic);
         assert_eq!(server.console_config().stats_interval_secs, 30);

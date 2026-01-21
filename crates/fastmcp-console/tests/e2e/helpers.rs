@@ -3,10 +3,56 @@
 //! Provides infrastructure for spawning server processes and capturing their output.
 
 use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{OnceLock, mpsc};
 use std::thread;
 use std::time::Duration;
+
+/// Build the test server binary once before tests run.
+/// This avoids cargo lock contention when tests run in parallel.
+static TEST_SERVER_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// Ensure the test server binary is built and return its path.
+fn get_test_server_binary() -> PathBuf {
+    TEST_SERVER_PATH
+        .get_or_init(|| {
+            eprintln!("[E2E] Building test_server binary...");
+            let output = Command::new("cargo")
+                .args([
+                    "build",
+                    "--package",
+                    "fastmcp-console",
+                    "--example",
+                    "test_server",
+                ])
+                .current_dir(env!("CARGO_MANIFEST_DIR"))
+                .output()
+                .expect("Failed to build test_server");
+
+            if !output.status.success() {
+                panic!(
+                    "Failed to build test_server: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+
+            // Find the binary in target directory
+            let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let target_dir = std::env::var("CARGO_TARGET_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| manifest_dir.join("../../target"));
+            let binary_path = target_dir.join("debug/examples/test_server");
+
+            if !binary_path.exists() {
+                panic!("test_server binary not found at {:?}", binary_path);
+            }
+
+            eprintln!("[E2E] Built test_server at {:?}", binary_path);
+            binary_path
+        })
+        .clone()
+}
 
 /// Configuration for E2E test runs.
 #[derive(Debug, Clone)]
@@ -193,7 +239,7 @@ impl TestServerResult {
     /// Print detailed diagnostics for debugging.
     pub fn print_diagnostics(&self) {
         eprintln!("\n=== E2E Test Result ===");
-        eprintln!("Exit code: {}", self.exit_code);
+        eprintln!("Exit code: {exit_code}", exit_code = self.exit_code);
         eprintln!("Duration: {:?}", self.duration);
         eprintln!("\n--- STDOUT ({} lines) ---", self.stdout.len());
         for (i, line) in self.stdout.iter().enumerate() {
@@ -250,21 +296,15 @@ impl TestServerRunner {
     pub fn run_with_messages(&self, messages: &[&str]) -> TestServerResult {
         let start = std::time::Instant::now();
 
-        // Build command - use cargo run to build and run test_server
-        let mut cmd = Command::new("cargo");
-        cmd.args([
-            "run",
-            "--quiet",
-            "--package",
-            "fastmcp-console",
-            "--example",
-            "test_server",
-            "--",
-        ])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        // Get the pre-built binary path (builds once on first call)
+        let binary_path = get_test_server_binary();
+
+        // Build command - use the pre-built binary directly
+        let mut cmd = Command::new(&binary_path);
+        cmd.current_dir(env!("CARGO_MANIFEST_DIR"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
         // Set environment variables
         for (key, value) in &self.config.env_vars {
@@ -277,6 +317,7 @@ impl TestServerRunner {
         }
 
         eprintln!("[E2E] Starting server with {} messages", messages.len());
+        eprintln!("[E2E] Binary: {:?}", binary_path);
         eprintln!("[E2E] Environment: {:?}", self.config.env_vars);
         eprintln!("[E2E] Clear env: {:?}", self.config.clear_env);
 

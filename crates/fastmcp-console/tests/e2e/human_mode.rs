@@ -29,8 +29,7 @@ fn test_human_mode_has_rich_stderr() {
 
 #[test]
 fn test_force_color_enables_rich() {
-    let config = E2ETestConfig::default()
-        .with_env("FASTMCP_RICH", "1");
+    let config = E2ETestConfig::default().with_env("FASTMCP_RICH", "1");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_with_messages(&[&jsonrpc::initialize(1)]);
@@ -99,10 +98,7 @@ fn test_default_mode_without_agent_env() {
     result.assert_stdout_valid_jsonrpc();
 
     // Server should start successfully
-    assert_eq!(
-        result.exit_code, 0,
-        "Server should exit cleanly"
-    );
+    assert_eq!(result.exit_code, 0, "Server should exit cleanly");
 }
 
 #[test]

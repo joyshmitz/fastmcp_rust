@@ -88,7 +88,7 @@ impl RichLogFormatter {
         }
     }
 
-    /// Format a level badge (e.g., "[ERROR]", "[INFO ]").
+    /// Format a level badge (e.g., `[ERROR]`, `[INFO ]`).
     #[must_use]
     pub fn format_level_badge(&self, level: LogLevel) -> String {
         let text = format!("{:5}", level.as_str());

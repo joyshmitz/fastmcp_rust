@@ -6,8 +6,7 @@ use super::helpers::*;
 
 #[test]
 fn test_banner_style_none() {
-    let config = E2ETestConfig::default()
-        .with_env("FASTMCP_BANNER", "none");
+    let config = E2ETestConfig::default().with_env("FASTMCP_BANNER", "none");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_demo_mode();
@@ -16,48 +15,36 @@ fn test_banner_style_none() {
 
     // With banner=none, should not show the fancy FastMCP banner
     // (though may still have log output)
-    assert_eq!(
-        result.exit_code, 0,
-        "Server should exit cleanly"
-    );
+    assert_eq!(result.exit_code, 0, "Server should exit cleanly");
 }
 
 #[test]
 fn test_banner_style_compact() {
-    let config = E2ETestConfig::default()
-        .with_env("FASTMCP_BANNER", "compact");
+    let config = E2ETestConfig::default().with_env("FASTMCP_BANNER", "compact");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_demo_mode();
 
     result.print_diagnostics();
 
-    assert_eq!(
-        result.exit_code, 0,
-        "Server should exit cleanly"
-    );
+    assert_eq!(result.exit_code, 0, "Server should exit cleanly");
 }
 
 #[test]
 fn test_banner_style_minimal() {
-    let config = E2ETestConfig::default()
-        .with_env("FASTMCP_BANNER", "minimal");
+    let config = E2ETestConfig::default().with_env("FASTMCP_BANNER", "minimal");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_demo_mode();
 
     result.print_diagnostics();
 
-    assert_eq!(
-        result.exit_code, 0,
-        "Server should exit cleanly"
-    );
+    assert_eq!(result.exit_code, 0, "Server should exit cleanly");
 }
 
 #[test]
 fn test_no_banner_env() {
-    let config = E2ETestConfig::default()
-        .with_env("FASTMCP_NO_BANNER", "1");
+    let config = E2ETestConfig::default().with_env("FASTMCP_NO_BANNER", "1");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_demo_mode();
@@ -72,8 +59,7 @@ fn test_no_banner_env() {
 
 #[test]
 fn test_log_level_debug() {
-    let config = E2ETestConfig::default()
-        .with_env("FASTMCP_LOG", "debug");
+    let config = E2ETestConfig::default().with_env("FASTMCP_LOG", "debug");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_with_messages(&[&jsonrpc::ping(1)]);
@@ -86,8 +72,7 @@ fn test_log_level_debug() {
 
 #[test]
 fn test_log_level_error() {
-    let config = E2ETestConfig::default()
-        .with_env("FASTMCP_LOG", "error");
+    let config = E2ETestConfig::default().with_env("FASTMCP_LOG", "error");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_with_messages(&[&jsonrpc::ping(1)]);
@@ -100,8 +85,7 @@ fn test_log_level_error() {
 
 #[test]
 fn test_log_timestamps_disabled() {
-    let config = E2ETestConfig::default()
-        .with_env("FASTMCP_LOG_TIMESTAMPS", "0");
+    let config = E2ETestConfig::default().with_env("FASTMCP_LOG_TIMESTAMPS", "0");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_with_messages(&[&jsonrpc::ping(1)]);
@@ -113,8 +97,7 @@ fn test_log_timestamps_disabled() {
 
 #[test]
 fn test_log_targets_disabled() {
-    let config = E2ETestConfig::default()
-        .with_env("FASTMCP_LOG_TARGETS", "0");
+    let config = E2ETestConfig::default().with_env("FASTMCP_LOG_TARGETS", "0");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_with_messages(&[&jsonrpc::ping(1)]);
@@ -164,10 +147,7 @@ fn test_agent_mode_with_all_options() {
         .with_env("FASTMCP_BANNER", "none");
 
     let runner = TestServerRunner::new(config);
-    let result = runner.run_with_messages(&[
-        &jsonrpc::initialize(1),
-        &jsonrpc::tools_list(2),
-    ]);
+    let result = runner.run_with_messages(&[&jsonrpc::initialize(1), &jsonrpc::tools_list(2)]);
 
     result.print_diagnostics();
 

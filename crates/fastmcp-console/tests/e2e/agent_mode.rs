@@ -7,8 +7,7 @@ use super::helpers::*;
 
 #[test]
 fn test_mcp_client_env_triggers_agent_mode() {
-    let config = E2ETestConfig::default()
-        .with_env("MCP_CLIENT", "claude-desktop");
+    let config = E2ETestConfig::default().with_env("MCP_CLIENT", "claude-desktop");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_with_messages(&[&jsonrpc::initialize(1)]);
@@ -22,8 +21,7 @@ fn test_mcp_client_env_triggers_agent_mode() {
 
 #[test]
 fn test_claude_code_env_triggers_agent_mode() {
-    let config = E2ETestConfig::default()
-        .with_env("CLAUDE_CODE", "1");
+    let config = E2ETestConfig::default().with_env("CLAUDE_CODE", "1");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_with_messages(&[&jsonrpc::initialize(1)]);
@@ -37,8 +35,7 @@ fn test_claude_code_env_triggers_agent_mode() {
 
 #[test]
 fn test_codex_cli_env_triggers_agent_mode() {
-    let config = E2ETestConfig::default()
-        .with_env("CODEX_CLI", "1");
+    let config = E2ETestConfig::default().with_env("CODEX_CLI", "1");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_with_messages(&[&jsonrpc::initialize(1)]);
@@ -66,8 +63,7 @@ fn test_ci_env_triggers_agent_mode() {
 
 #[test]
 fn test_agent_mode_env_triggers_agent_mode() {
-    let config = E2ETestConfig::default()
-        .with_env("AGENT_MODE", "1");
+    let config = E2ETestConfig::default().with_env("AGENT_MODE", "1");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_with_messages(&[&jsonrpc::initialize(1)]);
@@ -101,8 +97,7 @@ fn test_no_color_disables_ansi() {
 
 #[test]
 fn test_fastmcp_plain_env_triggers_plain_mode() {
-    let config = E2ETestConfig::default()
-        .with_env("FASTMCP_PLAIN", "1");
+    let config = E2ETestConfig::default().with_env("FASTMCP_PLAIN", "1");
 
     let runner = TestServerRunner::new(config);
     let result = runner.run_with_messages(&[&jsonrpc::initialize(1)]);
@@ -133,10 +128,7 @@ fn test_agent_mode_with_multiple_requests() {
     result.assert_stdout_valid_jsonrpc();
 
     // Should have all responses
-    assert!(
-        result.stdout.len() >= 4,
-        "Should have at least 4 responses"
-    );
+    assert!(result.stdout.len() >= 4, "Should have at least 4 responses");
 }
 
 #[test]
@@ -154,8 +146,8 @@ fn test_agent_mode_stdout_is_pure_jsonrpc() {
             continue;
         }
 
-        let parsed: serde_json::Value = serde_json::from_str(line)
-            .expect("stdout must be valid JSON");
+        let parsed: serde_json::Value =
+            serde_json::from_str(line).expect("stdout must be valid JSON");
 
         assert!(
             parsed.get("jsonrpc").is_some(),

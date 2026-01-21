@@ -415,7 +415,11 @@ impl<R: Read, W: Write> WsTransport<R, W> {
     /// Sends a request through this transport.
     ///
     /// Convenience method that wraps a request in a message.
-    pub fn send_request(&mut self, cx: &Cx, request: &JsonRpcRequest) -> Result<(), TransportError> {
+    pub fn send_request(
+        &mut self,
+        cx: &Cx,
+        request: &JsonRpcRequest,
+    ) -> Result<(), TransportError> {
         self.send(cx, &JsonRpcMessage::Request(request.clone()))
     }
 

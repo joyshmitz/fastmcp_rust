@@ -17,10 +17,10 @@
 
 mod helpers;
 
-mod server_lifecycle;
 mod agent_mode;
-mod human_mode;
 mod configuration;
+mod human_mode;
+mod server_lifecycle;
 
 // Re-export helpers for use in tests
 pub use helpers::*;

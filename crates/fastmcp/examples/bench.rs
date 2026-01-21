@@ -69,13 +69,13 @@ fn noop(_ctx: &McpContext) -> String {
 }
 
 #[tool(description = "Echo back the input")]
-#[allow(clippy::needless_pass_by_value)]  // Macro requires String
+#[allow(clippy::needless_pass_by_value)] // Macro requires String
 fn bench_echo(_ctx: &McpContext, message: String) -> String {
     message
 }
 
 #[tool(description = "Parse and return JSON")]
-#[allow(clippy::needless_pass_by_value)]  // Macro requires String
+#[allow(clippy::needless_pass_by_value)] // Macro requires String
 fn json_roundtrip(_ctx: &McpContext, data: String) -> String {
     // Parse then re-serialize
     match serde_json::from_str::<serde_json::Value>(&data) {
@@ -90,7 +90,7 @@ fn bench_data(_ctx: &McpContext) -> String {
 }
 
 #[prompt(description = "Benchmark prompt")]
-#[allow(clippy::needless_pass_by_value)]  // Macro requires String
+#[allow(clippy::needless_pass_by_value)] // Macro requires String
 fn bench_prompt(_ctx: &McpContext, name: String) -> Vec<PromptMessage> {
     vec![PromptMessage {
         role: Role::User,

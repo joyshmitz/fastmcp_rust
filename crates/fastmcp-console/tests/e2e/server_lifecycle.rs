@@ -128,10 +128,7 @@ fn test_server_logs_to_stderr() {
 #[test]
 fn test_stdout_only_contains_jsonrpc() {
     let runner = TestServerRunner::new(E2ETestConfig::default());
-    let result = runner.run_with_messages(&[
-        &jsonrpc::initialize(1),
-        &jsonrpc::tools_list(2),
-    ]);
+    let result = runner.run_with_messages(&[&jsonrpc::initialize(1), &jsonrpc::tools_list(2)]);
 
     result.print_diagnostics();
 
@@ -162,9 +159,8 @@ fn test_stdout_only_contains_jsonrpc() {
 #[test]
 fn test_server_handles_unknown_method() {
     let runner = TestServerRunner::new(E2ETestConfig::default());
-    let result = runner.run_with_messages(&[
-        r#"{"jsonrpc":"2.0","id":1,"method":"unknown/method","params":{}}"#,
-    ]);
+    let result = runner
+        .run_with_messages(&[r#"{"jsonrpc":"2.0","id":1,"method":"unknown/method","params":{}}"#]);
 
     result.print_diagnostics();
 

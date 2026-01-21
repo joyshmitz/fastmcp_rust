@@ -1,10 +1,24 @@
-//! Status/progress output
+//! Status/progress output.
+//!
+//! Provides lightweight request status logging for stderr, with rich output
+//! when available and a plain-text fallback in agent contexts.
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use fastmcp_console::console::FastMcpConsole;
+//! use fastmcp_console::status::RequestLog;
+//!
+//! let console = FastMcpConsole::new();
+//! let log = RequestLog::new("tools/call", Some("1")).success();
+//! log.render(&console);
+//! ```
 
 use std::time::{Duration, Instant};
 
 use crate::console::FastMcpConsole;
 
-/// Format for displaying request/response activity
+/// Format for displaying request/response activity.
 pub struct RequestLog {
     method: String,
     id: Option<String>,
@@ -12,14 +26,20 @@ pub struct RequestLog {
     status: RequestStatus,
 }
 
+/// Current request status for display.
 pub enum RequestStatus {
+    /// Request is still pending.
     Pending,
+    /// Request completed successfully.
     Success(Duration),
+    /// Request failed with a message and duration.
     Error(String, Duration),
+    /// Request was cancelled with duration.
     Cancelled(Duration),
 }
 
 impl RequestLog {
+    /// Create a new request log for a method and optional request ID.
     pub fn new(method: &str, id: Option<&str>) -> Self {
         Self {
             method: method.to_string(),
@@ -29,22 +49,25 @@ impl RequestLog {
         }
     }
 
+    /// Mark the request as successful.
     pub fn success(mut self) -> Self {
         self.status = RequestStatus::Success(self.start.elapsed());
         self
     }
 
+    /// Mark the request as failed with an error message.
     pub fn error(mut self, msg: &str) -> Self {
         self.status = RequestStatus::Error(msg.to_string(), self.start.elapsed());
         self
     }
 
+    /// Mark the request as cancelled.
     pub fn cancelled(mut self) -> Self {
         self.status = RequestStatus::Cancelled(self.start.elapsed());
         self
     }
 
-    /// Render to console
+    /// Render the log entry to the console.
     pub fn render(&self, console: &FastMcpConsole) {
         if !console.is_rich() {
             self.render_plain();
