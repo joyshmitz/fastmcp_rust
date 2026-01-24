@@ -190,7 +190,7 @@ impl Server {
     /// Returns `None` if statistics collection is disabled.
     #[must_use]
     pub fn stats(&self) -> Option<StatsSnapshot> {
-        self.stats.as_ref().map(|s| s.snapshot())
+        self.stats.as_ref().map(ServerStats::snapshot)
     }
 
     /// Returns the raw statistics collector.

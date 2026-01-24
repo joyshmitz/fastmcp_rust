@@ -45,10 +45,10 @@ fn get_test_server_binary() -> PathBuf {
             let binary_path = target_dir.join("debug/examples/test_server");
 
             if !binary_path.exists() {
-                panic!("test_server binary not found at {:?}", binary_path);
+                panic!("test_server binary not found at {}", binary_path.display());
             }
 
-            eprintln!("[E2E] Built test_server at {:?}", binary_path);
+            eprintln!("[E2E] Built test_server at {}", binary_path.display());
             binary_path
         })
         .clone()
@@ -317,7 +317,7 @@ impl TestServerRunner {
         }
 
         eprintln!("[E2E] Starting server with {} messages", messages.len());
-        eprintln!("[E2E] Binary: {:?}", binary_path);
+        eprintln!("[E2E] Binary: {}", binary_path.display());
         eprintln!("[E2E] Environment: {:?}", self.config.env_vars);
         eprintln!("[E2E] Clear env: {:?}", self.config.clear_env);
 
@@ -371,7 +371,7 @@ fn capture_with_timeout(child: &mut Child, timeout: Duration) -> TestServerResul
     if let Some(stdout) = stdout_handle {
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
-            let lines: Vec<String> = reader.lines().filter_map(Result::ok).collect();
+            let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
             let _ = stdout_tx.send(lines);
         });
     } else {
@@ -381,7 +381,7 @@ fn capture_with_timeout(child: &mut Child, timeout: Duration) -> TestServerResul
     if let Some(stderr) = stderr_handle {
         thread::spawn(move || {
             let reader = BufReader::new(stderr);
-            let lines: Vec<String> = reader.lines().filter_map(Result::ok).collect();
+            let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
             let _ = stderr_tx.send(lines);
         });
     } else {

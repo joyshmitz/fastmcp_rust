@@ -10,8 +10,10 @@ fn main() {
     let console = FastMcpConsole::new();
 
     // Create a local theme and customize a color.
-    let mut theme = FastMcpTheme::default();
-    theme.primary = Color::from_rgb(255, 120, 0);
+    let theme = FastMcpTheme {
+        primary: Color::from_rgb(255, 120, 0),
+        ..FastMcpTheme::default()
+    };
 
     let headline = Style::new().bold().color(theme.primary);
     console.print_styled("Custom theme preview", headline);
