@@ -1,0 +1,8 @@
+# Beads Project Configuration
+# issue_prefix: bd
+# default_priority: 2
+# default_type: task
+
+# Daemon permanently disabled
+no-daemon: true
+auto-start-daemon: false
