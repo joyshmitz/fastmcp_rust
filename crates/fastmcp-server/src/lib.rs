@@ -38,7 +38,12 @@ mod tasks;
 #[cfg(test)]
 mod tests;
 
-pub use auth::{AllowAllAuthProvider, AuthProvider, AuthRequest};
+#[cfg(feature = "jwt")]
+pub use auth::JwtTokenVerifier;
+pub use auth::{
+    AllowAllAuthProvider, AuthProvider, AuthRequest, StaticTokenVerifier, TokenAuthProvider,
+    TokenVerifier,
+};
 pub use builder::ServerBuilder;
 pub use fastmcp_console::config::{BannerStyle, ConsoleConfig, TrafficVerbosity};
 pub use fastmcp_console::stats::{ServerStats, StatsSnapshot};
@@ -54,21 +59,22 @@ pub use tasks::{SharedTaskManager, TaskManager};
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
-use asupersync::{Budget, CancelKind, Cx};
+use asupersync::{Budget, CancelKind, Cx, RegionId};
+use fastmcp_console::client::RequestResponseRenderer;
 use fastmcp_console::logging::RichLoggerBuilder;
 use fastmcp_console::{banner::StartupBanner, console};
 use fastmcp_core::logging::{debug, error, info, targets};
-use fastmcp_core::{AuthContext, McpContext, McpError, McpErrorCode};
+use fastmcp_core::{AuthContext, McpContext, McpError, McpErrorCode, McpResult};
 use fastmcp_protocol::{
     CallToolParams, CancelTaskParams, CancelledParams, GetPromptParams, GetTaskParams,
     InitializeParams, JsonRpcError, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse,
     ListPromptsParams, ListResourceTemplatesParams, ListResourcesParams, ListTasksParams,
-    ListToolsParams, LogLevel, Prompt, ReadResourceParams, RequestId, Resource, ResourceTemplate,
-    ServerCapabilities, ServerInfo, SetLogLevelParams, SubmitTaskParams, SubscribeResourceParams,
-    Tool, UnsubscribeResourceParams,
+    ListToolsParams, LogLevel, LogMessageParams, Prompt, ReadResourceParams, RequestId, Resource,
+    ResourceTemplate, ServerCapabilities, ServerInfo, SetLogLevelParams, SubmitTaskParams,
+    SubscribeResourceParams, Tool, UnsubscribeResourceParams,
 };
 use fastmcp_transport::sse::SseServerTransport;
 use fastmcp_transport::websocket::WsTransport;
@@ -214,7 +220,7 @@ pub struct Server {
     /// Registered middleware.
     middleware: Arc<Vec<Box<dyn crate::Middleware>>>,
     /// Active requests by JSON-RPC request ID.
-    active_requests: Mutex<HashMap<RequestId, Cx>>,
+    active_requests: Mutex<HashMap<RequestId, ActiveRequest>>,
     /// Optional task manager for background tasks (Docket/SEP-1686).
     task_manager: Option<SharedTaskManager>,
 }
@@ -511,6 +517,7 @@ impl Server {
 
     /// Performs graceful shutdown: runs hook, closes stats, exits.
     fn graceful_shutdown(&self, exit_code: i32) -> ! {
+        self.cancel_active_requests(CancelKind::Shutdown, true);
         self.run_shutdown_hook();
         if let Some(ref stats) = self.stats {
             stats.connection_closed();
@@ -548,6 +555,26 @@ impl Server {
             self.graceful_shutdown(1);
         }
 
+        // Create traffic renderer if enabled
+        let traffic_renderer = if self.console_config.show_request_traffic {
+            let mut renderer = RequestResponseRenderer::new(self.console_config.resolve_context());
+            renderer.truncate_at = self.console_config.truncate_at;
+            match self.console_config.traffic_verbosity {
+                TrafficVerbosity::None => {} // Should not happen given the if check
+                TrafficVerbosity::Summary | TrafficVerbosity::Headers => {
+                    renderer.show_params = false;
+                    renderer.show_result = false;
+                }
+                TrafficVerbosity::Full => {
+                    renderer.show_params = true;
+                    renderer.show_result = true;
+                }
+            }
+            Some(renderer)
+        } else {
+            None
+        };
+
         // Main request loop
         loop {
             // Check for cancellation
@@ -573,6 +600,15 @@ impl Server {
                 }
             };
 
+            // Log request traffic
+            if let Some(renderer) = &traffic_renderer {
+                if let JsonRpcMessage::Request(req) = &message {
+                    renderer.render_request(req, console());
+                }
+            }
+
+            let start_time = Instant::now();
+
             // Handle the message
             let response_opt = match message {
                 JsonRpcMessage::Request(request) => {
@@ -592,7 +628,14 @@ impl Server {
                 }
             };
 
+            let duration = start_time.elapsed();
+
             if let Some(response) = response_opt {
+                // Log response traffic
+                if let Some(renderer) = &traffic_renderer {
+                    renderer.render_response(&response, Some(duration), console());
+                }
+
                 // Track bytes sent (approximate from serialized response size)
                 if let Some(ref stats) = self.stats {
                     if let Ok(json) = serde_json::to_string(&response) {
@@ -650,7 +693,7 @@ impl Server {
         let request_cx = if is_notification {
             cx.clone()
         } else {
-            Cx::for_testing_with_budget(budget)
+            Cx::for_request_with_budget(budget)
         };
 
         let _active_guard = id.clone().map(|request_id| {
@@ -751,15 +794,33 @@ impl Server {
             ));
         }
 
+        if let Some(task_manager) = &self.task_manager {
+            task_manager.set_notification_sender(Arc::clone(notification_sender));
+        }
+
         // Middleware: on_request
         // We use a temporary context derived from the request context for middleware
         // so they can access session state but share the request's lifecycle.
         let mw_ctx = McpContext::with_state(cx.clone(), request_id, session.state().clone());
+        let mut entered_middleware: Vec<&dyn crate::Middleware> = Vec::new();
 
         for m in self.middleware.iter() {
-            match m.on_request(&mw_ctx, &request)? {
-                crate::MiddlewareDecision::Continue => {}
-                crate::MiddlewareDecision::Respond(v) => return Ok(v),
+            entered_middleware.push(m.as_ref());
+            match m.on_request(&mw_ctx, &request) {
+                Ok(crate::MiddlewareDecision::Continue) => {}
+                Ok(crate::MiddlewareDecision::Respond(v)) => {
+                    return self.apply_middleware_response(
+                        &entered_middleware,
+                        &mw_ctx,
+                        &request,
+                        v,
+                    );
+                }
+                Err(e) => {
+                    let err =
+                        self.apply_middleware_error(&entered_middleware, &mw_ctx, &request, e);
+                    return Err(err);
+                }
             }
         }
 
@@ -797,7 +858,7 @@ impl Server {
             }
             "logging/setLevel" => {
                 let params: SetLogLevelParams = parse_params(params)?;
-                self.handle_set_log_level(params);
+                self.handle_set_log_level(session, params);
                 Ok(serde_json::Value::Null)
             }
             "tools/list" => {
@@ -905,23 +966,48 @@ impl Server {
             _ => Err(McpError::method_not_found(method)),
         };
 
-        // Middleware: on_response / on_error
-        match result {
-            Ok(v) => {
-                let mut resp = v;
-                for m in self.middleware.iter() {
-                    resp = m.on_response(&mw_ctx, &request, resp)?;
+        let final_result = match result {
+            Ok(v) => self.apply_middleware_response(&entered_middleware, &mw_ctx, &request, v),
+            Err(e) => Err(self.apply_middleware_error(&entered_middleware, &mw_ctx, &request, e)),
+        };
+
+        self.maybe_emit_log_notification(session, notification_sender, method, &final_result);
+
+        final_result
+    }
+
+    fn apply_middleware_response(
+        &self,
+        stack: &[&dyn crate::Middleware],
+        ctx: &McpContext,
+        request: &JsonRpcRequest,
+        value: serde_json::Value,
+    ) -> Result<serde_json::Value, McpError> {
+        let mut response = value;
+        for m in stack.iter().rev() {
+            match m.on_response(ctx, request, response) {
+                Ok(next) => response = next,
+                Err(err) => {
+                    let mapped = self.apply_middleware_error(stack, ctx, request, err);
+                    return Err(mapped);
                 }
-                Ok(resp)
-            }
-            Err(e) => {
-                let mut err = e;
-                for m in self.middleware.iter() {
-                    err = m.on_error(&mw_ctx, &request, err);
-                }
-                Err(err)
             }
         }
+        Ok(response)
+    }
+
+    fn apply_middleware_error(
+        &self,
+        stack: &[&dyn crate::Middleware],
+        ctx: &McpContext,
+        request: &JsonRpcRequest,
+        error: McpError,
+    ) -> McpError {
+        let mut err = error;
+        for m in stack.iter().rev() {
+            err = m.on_error(ctx, request, err);
+        }
+        err
     }
 
     fn should_authenticate(&self, method: &str) -> bool {
@@ -963,21 +1049,28 @@ impl Server {
             reason,
             await_cleanup
         );
-        if await_cleanup {
-            fastmcp_core::logging::warn!(
-                target: targets::SESSION,
-                "await_cleanup requested but not supported without per-request regions"
-            );
-        }
-        let cx = {
+        let active = {
             let guard = self
                 .active_requests
                 .lock()
                 .expect("active_requests lock poisoned");
-            guard.get(&params.request_id).cloned()
+            guard
+                .get(&params.request_id)
+                .map(|entry| (entry.cx.clone(), entry.region_id, entry.completion.clone()))
         };
-        if let Some(cx) = cx {
+        if let Some((cx, region_id, completion)) = active {
             cx.cancel_with(CancelKind::User, None);
+            if await_cleanup {
+                let completed = completion.wait_timeout(AWAIT_CLEANUP_TIMEOUT);
+                if !completed {
+                    fastmcp_core::logging::warn!(
+                        target: targets::SESSION,
+                        "await_cleanup timed out for requestId={} (region={:?})",
+                        params.request_id,
+                        region_id
+                    );
+                }
+            }
         } else {
             fastmcp_core::logging::warn!(
                 target: targets::SESSION,
@@ -987,7 +1080,54 @@ impl Server {
         }
     }
 
-    fn handle_set_log_level(&self, params: SetLogLevelParams) {
+    fn cancel_active_requests(&self, kind: CancelKind, await_cleanup: bool) {
+        let active: Vec<(RequestId, RegionId, Cx, Arc<RequestCompletion>)> = {
+            let guard = self
+                .active_requests
+                .lock()
+                .expect("active_requests lock poisoned");
+            guard
+                .iter()
+                .map(|(request_id, entry)| {
+                    (
+                        request_id.clone(),
+                        entry.region_id,
+                        entry.cx.clone(),
+                        entry.completion.clone(),
+                    )
+                })
+                .collect()
+        };
+        if active.is_empty() {
+            return;
+        }
+        info!(
+            target: targets::SESSION,
+            "Cancelling {} active request(s) (kind={:?}, await_cleanup={})",
+            active.len(),
+            kind,
+            await_cleanup
+        );
+        for (_, _, cx, _) in &active {
+            cx.cancel_with(kind, None);
+        }
+
+        if await_cleanup {
+            for (request_id, region_id, _cx, completion) in active {
+                let completed = completion.wait_timeout(AWAIT_CLEANUP_TIMEOUT);
+                if !completed {
+                    fastmcp_core::logging::warn!(
+                        target: targets::SESSION,
+                        "Shutdown cancel timed out for requestId={} (region={:?})",
+                        request_id,
+                        region_id
+                    );
+                }
+            }
+        }
+    }
+
+    fn handle_set_log_level(&self, session: &mut Session, params: SetLogLevelParams) {
         let requested = match params.level {
             LogLevel::Debug => LevelFilter::Debug,
             LogLevel::Info => LevelFilter::Info,
@@ -1004,6 +1144,15 @@ impl Server {
 
         log::set_max_level(effective);
 
+        let effective_level = match effective {
+            LevelFilter::Debug => LogLevel::Debug,
+            LevelFilter::Info => LogLevel::Info,
+            LevelFilter::Warn => LogLevel::Warning,
+            LevelFilter::Error => LogLevel::Error,
+            _ => LogLevel::Info,
+        };
+        session.set_log_level(effective_level);
+
         if effective != requested {
             fastmcp_core::logging::warn!(
                 target: targets::SESSION,
@@ -1019,31 +1168,202 @@ impl Server {
             );
         }
     }
+
+    fn log_level_rank(level: LogLevel) -> u8 {
+        match level {
+            LogLevel::Debug => 1,
+            LogLevel::Info => 2,
+            LogLevel::Warning => 3,
+            LogLevel::Error => 4,
+        }
+    }
+
+    fn emit_log_notification(
+        &self,
+        session: &Session,
+        sender: &NotificationSender,
+        level: LogLevel,
+        message: impl Into<String>,
+    ) {
+        let Some(min_level) = session.log_level() else {
+            return;
+        };
+        if Self::log_level_rank(level) < Self::log_level_rank(min_level) {
+            return;
+        }
+
+        let ts = chrono::Utc::now().to_rfc3339();
+        let text = format!("{ts} {}", message.into());
+        let params = LogMessageParams {
+            level,
+            logger: Some("fastmcp::server".to_string()),
+            data: serde_json::Value::String(text),
+        };
+        let payload = match serde_json::to_value(params) {
+            Ok(value) => value,
+            Err(err) => {
+                fastmcp_core::logging::warn!(
+                    target: targets::SESSION,
+                    "Failed to serialize log message notification: {}",
+                    err
+                );
+                return;
+            }
+        };
+        sender(JsonRpcRequest::notification(
+            "notifications/message",
+            Some(payload),
+        ));
+    }
+
+    fn maybe_emit_log_notification(
+        &self,
+        session: &Session,
+        sender: &NotificationSender,
+        method: &str,
+        result: &McpResult<serde_json::Value>,
+    ) {
+        if method.starts_with("notifications/") || method == "logging/setLevel" {
+            return;
+        }
+        let level = if result.is_ok() {
+            LogLevel::Info
+        } else {
+            LogLevel::Error
+        };
+        let message = if result.is_ok() {
+            format!("Handled {}", method)
+        } else {
+            format!("Error handling {}", method)
+        };
+        self.emit_log_notification(session, sender, level, message);
+    }
+}
+
+const AWAIT_CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
+
+struct RequestCompletion {
+    done: Mutex<bool>,
+    cv: Condvar,
+}
+
+impl RequestCompletion {
+    fn new() -> Self {
+        Self {
+            done: Mutex::new(false),
+            cv: Condvar::new(),
+        }
+    }
+
+    fn mark_done(&self) {
+        let mut done = self.done.lock().expect("completion lock poisoned");
+        if !*done {
+            *done = true;
+            self.cv.notify_all();
+        }
+    }
+
+    fn wait_timeout(&self, timeout: Duration) -> bool {
+        let mut done = self.done.lock().expect("completion lock poisoned");
+        if *done {
+            return true;
+        }
+        let start = Instant::now();
+        let mut remaining = timeout;
+        loop {
+            let (guard, result) = self
+                .cv
+                .wait_timeout(done, remaining)
+                .expect("completion lock poisoned");
+            done = guard;
+            if *done {
+                return true;
+            }
+            if result.timed_out() {
+                return false;
+            }
+            let elapsed = start.elapsed();
+            remaining = match timeout.checked_sub(elapsed) {
+                Some(left) if !left.is_zero() => left,
+                _ => return false,
+            };
+        }
+    }
+
+    fn is_done(&self) -> bool {
+        let done = self.done.lock().expect("completion lock poisoned");
+        *done
+    }
+}
+
+struct ActiveRequest {
+    cx: Cx,
+    region_id: RegionId,
+    completion: Arc<RequestCompletion>,
+}
+
+impl ActiveRequest {
+    fn new(cx: Cx, completion: Arc<RequestCompletion>) -> Self {
+        let region_id = cx.region_id();
+        Self {
+            cx,
+            region_id,
+            completion,
+        }
+    }
 }
 
 struct ActiveRequestGuard<'a> {
-    map: &'a Mutex<HashMap<RequestId, Cx>>,
+    map: &'a Mutex<HashMap<RequestId, ActiveRequest>>,
     id: RequestId,
+    completion: Arc<RequestCompletion>,
 }
 
 impl<'a> ActiveRequestGuard<'a> {
-    fn new(map: &'a Mutex<HashMap<RequestId, Cx>>, id: RequestId, cx: Cx) -> Self {
+    fn new(map: &'a Mutex<HashMap<RequestId, ActiveRequest>>, id: RequestId, cx: Cx) -> Self {
+        let completion = Arc::new(RequestCompletion::new());
+        let entry = ActiveRequest::new(cx, completion.clone());
         let mut guard = map.lock().expect("active_requests lock poisoned");
-        if guard.insert(id.clone(), cx).is_some() {
+        if guard.insert(id.clone(), entry).is_some() {
             fastmcp_core::logging::warn!(
                 target: targets::SESSION,
                 "Active request replaced for requestId={}",
                 id
             );
         }
-        Self { map, id }
+        Self {
+            map,
+            id,
+            completion,
+        }
     }
 }
 
 impl Drop for ActiveRequestGuard<'_> {
     fn drop(&mut self) {
-        let mut guard = self.map.lock().expect("active_requests lock poisoned");
-        guard.remove(&self.id);
+        {
+            let mut guard = self.map.lock().expect("active_requests lock poisoned");
+            match guard.get(&self.id) {
+                Some(entry) if Arc::ptr_eq(&entry.completion, &self.completion) => {
+                    guard.remove(&self.id);
+                }
+                Some(_) => {
+                    fastmcp_core::logging::warn!(
+                        target: targets::SESSION,
+                        "Active request replaced before drop for requestId={}",
+                        self.id
+                    );
+                }
+                None => {
+                    fastmcp_core::logging::warn!(
+                        target: targets::SESSION,
+                        "Active request missing on drop for requestId={}",
+                        self.id
+                    );
+                }
+            }
+        }
+        self.completion.mark_done();
     }
 }
 

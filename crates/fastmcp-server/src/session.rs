@@ -3,7 +3,13 @@
 use std::collections::HashSet;
 
 use fastmcp_core::SessionState;
-use fastmcp_protocol::{ClientCapabilities, ClientInfo, ServerCapabilities, ServerInfo};
+use fastmcp_core::logging::{debug, targets, warn};
+use fastmcp_protocol::{
+    ClientCapabilities, ClientInfo, JsonRpcRequest, LogLevel, ResourceUpdatedNotificationParams,
+    ServerCapabilities, ServerInfo,
+};
+
+use crate::NotificationSender;
 
 /// An MCP session between client and server.
 ///
@@ -24,6 +30,8 @@ pub struct Session {
     protocol_version: Option<String>,
     /// Resource subscriptions for this session.
     resource_subscriptions: HashSet<String>,
+    /// Session-scoped log level for log notifications.
+    log_level: Option<LogLevel>,
     /// Per-session state storage.
     state: SessionState,
 }
@@ -40,6 +48,7 @@ impl Session {
             server_capabilities,
             protocol_version: None,
             resource_subscriptions: HashSet::new(),
+            log_level: None,
             state: SessionState::new(),
         }
     }
@@ -116,5 +125,52 @@ impl Session {
     #[must_use]
     pub fn is_resource_subscribed(&self, uri: &str) -> bool {
         self.resource_subscriptions.contains(uri)
+    }
+
+    /// Sets the session log level for log notifications.
+    pub fn set_log_level(&mut self, level: LogLevel) {
+        self.log_level = Some(level);
+    }
+
+    /// Returns the current session log level for log notifications.
+    #[must_use]
+    pub fn log_level(&self) -> Option<LogLevel> {
+        self.log_level
+    }
+
+    /// Sends a resource updated notification if the session is subscribed.
+    ///
+    /// Returns true if a notification was sent.
+    pub fn notify_resource_updated(&self, uri: &str, sender: &NotificationSender) -> bool {
+        if !self.is_resource_subscribed(uri) {
+            return false;
+        }
+
+        let params = ResourceUpdatedNotificationParams {
+            uri: uri.to_string(),
+        };
+        let payload = match serde_json::to_value(params) {
+            Ok(value) => value,
+            Err(err) => {
+                warn!(
+                    target: targets::SESSION,
+                    "failed to serialize resource update for {}: {}",
+                    uri,
+                    err
+                );
+                return false;
+            }
+        };
+
+        debug!(
+            target: targets::SESSION,
+            "sending resource update notification for {}",
+            uri
+        );
+        sender(JsonRpcRequest::notification(
+            "notifications/resources/updated",
+            Some(payload),
+        ));
+        true
     }
 }

@@ -15,7 +15,7 @@ use fastmcp_protocol::{
 use crate::handler::{PromptHandler, ResourceHandler, ToolHandler, UriParams};
 
 /// Progress callback signature used by proxy backends.
-pub type ProgressCallback<'a> = &'a mut dyn FnMut(f64, Option<f64>, Option<&str>);
+pub type ProgressCallback<'a> = &'a mut dyn FnMut(f64, Option<f64>, Option<String>);
 
 /// Backend interface used by proxy handlers.
 pub trait ProxyBackend: Send {
@@ -85,7 +85,10 @@ impl ProxyBackend for Client {
         arguments: serde_json::Value,
         on_progress: ProgressCallback<'_>,
     ) -> McpResult<Vec<Content>> {
-        Client::call_tool_with_progress(self, name, arguments, on_progress)
+        let mut wrapper = |progress, total, message: Option<&str>| {
+            on_progress(progress, total, message.map(ToString::to_string));
+        };
+        Client::call_tool_with_progress(self, name, arguments, &mut wrapper)
     }
 
     fn read_resource(&mut self, uri: &str) -> McpResult<Vec<ResourceContent>> {
@@ -175,7 +178,20 @@ impl ProxyClient {
         arguments: serde_json::Value,
     ) -> McpResult<Vec<Content>> {
         ctx.checkpoint()?;
-        self.with_backend(|backend| backend.call_tool(name, arguments))
+        self.with_backend(|backend| {
+            if ctx.has_progress_reporter() {
+                let mut callback = |progress, total, message: Option<String>| {
+                    if let Some(total) = total {
+                        ctx.report_progress_with_total(progress, total, message.as_deref());
+                    } else {
+                        ctx.report_progress(progress, message.as_deref());
+                    }
+                };
+                backend.call_tool_with_progress(name, arguments, &mut callback)
+            } else {
+                backend.call_tool(name, arguments)
+            }
+        })
     }
 
     fn read_resource(&self, ctx: &McpContext, uri: &str) -> McpResult<Vec<ResourceContent>> {
@@ -359,7 +375,7 @@ mod tests {
             arguments: serde_json::Value,
             on_progress: super::ProgressCallback<'_>,
         ) -> fastmcp_core::McpResult<Vec<Content>> {
-            on_progress(0.5, Some(1.0), Some("half"));
+            on_progress(0.5, Some(1.0), Some("half".to_string()));
             self.call_tool(name, arguments)
         }
 

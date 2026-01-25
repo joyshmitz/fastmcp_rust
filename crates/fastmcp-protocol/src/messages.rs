@@ -358,6 +358,15 @@ impl ProgressParams {
     }
 }
 
+/// Resource updated notification params.
+///
+/// Sent from server to client when a subscribed resource changes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceUpdatedNotificationParams {
+    /// Updated resource URI.
+    pub uri: String,
+}
+
 /// Log message notification params.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogMessageParams {
@@ -474,4 +483,150 @@ pub struct TaskStatusNotificationParams {
     /// Task result (if completed successfully).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<TaskResult>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_resource_templates_params_serialization() {
+        let params = ListResourceTemplatesParams { cursor: None };
+        let value = serde_json::to_value(&params).expect("serialize params");
+        assert_eq!(value, serde_json::json!({}));
+
+        let params = ListResourceTemplatesParams {
+            cursor: Some("next".to_string()),
+        };
+        let value = serde_json::to_value(&params).expect("serialize params with cursor");
+        assert_eq!(value, serde_json::json!({ "cursor": "next" }));
+    }
+
+    #[test]
+    fn list_resource_templates_result_serialization() {
+        let result = ListResourceTemplatesResult {
+            resource_templates: vec![ResourceTemplate {
+                uri_template: "resource://{id}".to_string(),
+                name: "Resource Template".to_string(),
+                description: Some("Template description".to_string()),
+                mime_type: Some("text/plain".to_string()),
+            }],
+        };
+
+        let value = serde_json::to_value(&result).expect("serialize result");
+        let templates = value
+            .get("resourceTemplates")
+            .expect("resourceTemplates key");
+        let template = templates.get(0).expect("first resource template");
+
+        assert_eq!(template["uriTemplate"], "resource://{id}");
+        assert_eq!(template["name"], "Resource Template");
+        assert_eq!(template["description"], "Template description");
+        assert_eq!(template["mimeType"], "text/plain");
+    }
+
+    #[test]
+    fn resource_updated_notification_serialization() {
+        let params = ResourceUpdatedNotificationParams {
+            uri: "resource://test".to_string(),
+        };
+        let value = serde_json::to_value(&params).expect("serialize params");
+        assert_eq!(value, serde_json::json!({ "uri": "resource://test" }));
+    }
+
+    #[test]
+    fn subscribe_unsubscribe_resource_params_serialization() {
+        let subscribe = SubscribeResourceParams {
+            uri: "resource://alpha".to_string(),
+        };
+        let value = serde_json::to_value(&subscribe).expect("serialize subscribe params");
+        assert_eq!(value, serde_json::json!({ "uri": "resource://alpha" }));
+
+        let unsubscribe = UnsubscribeResourceParams {
+            uri: "resource://alpha".to_string(),
+        };
+        let value = serde_json::to_value(&unsubscribe).expect("serialize unsubscribe params");
+        assert_eq!(value, serde_json::json!({ "uri": "resource://alpha" }));
+    }
+
+    #[test]
+    fn logging_params_serialization() {
+        let set_level = SetLogLevelParams {
+            level: LogLevel::Warning,
+        };
+        let value = serde_json::to_value(&set_level).expect("serialize setLevel");
+        assert_eq!(value, serde_json::json!({ "level": "warning" }));
+
+        let log_message = LogMessageParams {
+            level: LogLevel::Info,
+            logger: Some("fastmcp::server".to_string()),
+            data: serde_json::Value::String("hello".to_string()),
+        };
+        let value = serde_json::to_value(&log_message).expect("serialize log message");
+        assert_eq!(value["level"], "info");
+        assert_eq!(value["logger"], "fastmcp::server");
+        assert_eq!(value["data"], "hello");
+    }
+
+    #[test]
+    fn list_tasks_params_serialization() {
+        let params = ListTasksParams {
+            cursor: None,
+            status: None,
+        };
+        let value = serde_json::to_value(&params).expect("serialize list tasks params");
+        assert_eq!(value, serde_json::json!({}));
+
+        let params = ListTasksParams {
+            cursor: Some("next".to_string()),
+            status: Some(TaskStatus::Running),
+        };
+        let value = serde_json::to_value(&params).expect("serialize list tasks params");
+        assert_eq!(
+            value,
+            serde_json::json!({"cursor": "next", "status": "running"})
+        );
+    }
+
+    #[test]
+    fn submit_task_params_serialization() {
+        let params = SubmitTaskParams {
+            task_type: "demo".to_string(),
+            params: None,
+        };
+        let value = serde_json::to_value(&params).expect("serialize submit task params");
+        assert_eq!(value, serde_json::json!({"taskType": "demo"}));
+
+        let params = SubmitTaskParams {
+            task_type: "demo".to_string(),
+            params: Some(serde_json::json!({"payload": 1})),
+        };
+        let value = serde_json::to_value(&params).expect("serialize submit task params");
+        assert_eq!(
+            value,
+            serde_json::json!({"taskType": "demo", "params": {"payload": 1}})
+        );
+    }
+
+    #[test]
+    fn task_status_notification_serialization() {
+        let params = TaskStatusNotificationParams {
+            id: TaskId::from_string("task-1"),
+            status: TaskStatus::Running,
+            progress: Some(0.5),
+            message: Some("halfway".to_string()),
+            error: None,
+            result: None,
+        };
+        let value = serde_json::to_value(&params).expect("serialize task status notification");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "id": "task-1",
+                "status": "running",
+                "progress": 0.5,
+                "message": "halfway"
+            })
+        );
+    }
 }

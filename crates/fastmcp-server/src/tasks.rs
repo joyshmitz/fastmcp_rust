@@ -37,8 +37,14 @@ use std::sync::{Arc, RwLock};
 
 use asupersync::runtime::{RuntimeBuilder, RuntimeHandle};
 use asupersync::{Budget, CancelKind, Cx};
+use fastmcp_core::logging::{debug, info, targets, warn};
 use fastmcp_core::{McpError, McpResult};
-use fastmcp_protocol::{TaskId, TaskInfo, TaskResult, TaskStatus};
+use fastmcp_protocol::{
+    JsonRpcRequest, TaskId, TaskInfo, TaskResult, TaskStatus, TaskStatusNotificationParams,
+};
+
+/// Notification sender used for task status updates.
+pub type TaskNotificationSender = Arc<dyn Fn(JsonRpcRequest) + Send + Sync>;
 
 /// Callback type for task execution.
 ///
@@ -62,6 +68,58 @@ struct TaskState {
     cx: Cx,
 }
 
+fn can_transition(from: TaskStatus, to: TaskStatus) -> bool {
+    matches!(
+        (from, to),
+        (
+            TaskStatus::Pending,
+            TaskStatus::Running | TaskStatus::Cancelled
+        ) | (
+            TaskStatus::Running,
+            TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
+        )
+    )
+}
+
+fn transition_state(state: &mut TaskState, to: TaskStatus) -> bool {
+    let from = state.info.status;
+    if from == to {
+        return true;
+    }
+    if !can_transition(from, to) {
+        warn!(
+            target: targets::SERVER,
+            "task {} invalid transition {:?} -> {:?}",
+            state.info.id,
+            from,
+            to
+        );
+        return false;
+    }
+
+    state.info.status = to;
+    let now = chrono::Utc::now().to_rfc3339();
+    match to {
+        TaskStatus::Running => {
+            state.info.started_at = Some(now.clone());
+        }
+        TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled => {
+            state.info.completed_at = Some(now.clone());
+        }
+        TaskStatus::Pending => {}
+    }
+
+    info!(
+        target: targets::SERVER,
+        "task {} status {:?} -> {:?} at {}",
+        state.info.id,
+        from,
+        to,
+        now
+    );
+    true
+}
+
 /// Background task manager.
 ///
 /// Manages the lifecycle of background tasks including submission, status
@@ -79,6 +137,8 @@ pub struct TaskManager {
     runtime: RuntimeHandle,
     /// Whether submitted tasks should execute immediately.
     auto_execute: bool,
+    /// Optional notification sender for task status updates.
+    notification_sender: Arc<RwLock<Option<TaskNotificationSender>>>,
 }
 
 impl TaskManager {
@@ -96,6 +156,7 @@ impl TaskManager {
             list_changed_notifications: false,
             runtime,
             auto_execute: true,
+            notification_sender: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -128,6 +189,15 @@ impl TaskManager {
     #[must_use]
     pub fn has_list_changed_notifications(&self) -> bool {
         self.list_changed_notifications
+    }
+
+    /// Sets the notification sender for task status updates.
+    pub fn set_notification_sender(&self, sender: TaskNotificationSender) {
+        let mut guard = self
+            .notification_sender
+            .write()
+            .expect("task notification sender lock poisoned");
+        *guard = Some(sender);
     }
 
     /// Registers a task handler for a specific task type.
@@ -173,7 +243,7 @@ impl TaskManager {
 
         // Create task info
         let now = chrono::Utc::now().to_rfc3339();
-        let task_cx = Cx::for_testing_with_budget(Budget::INFINITE);
+        let task_cx = Cx::for_request_with_budget(Budget::INFINITE);
         let info = TaskInfo {
             id: task_id.clone(),
             task_type: task_type.clone(),
@@ -185,6 +255,8 @@ impl TaskManager {
             completed_at: None,
             error: None,
         };
+
+        let info_snapshot = info.clone();
 
         // Store task state
         let state = TaskState {
@@ -198,6 +270,8 @@ impl TaskManager {
             let mut tasks = self.tasks.write().unwrap();
             tasks.insert(task_id.clone(), state);
         }
+
+        self.notify_status(info_snapshot, None);
 
         if self.auto_execute {
             let params = params.unwrap_or_else(|| serde_json::json!({}));
@@ -216,38 +290,52 @@ impl TaskManager {
     ) {
         let tasks = Arc::clone(&self.tasks);
         let handlers = Arc::clone(&self.handlers);
+        let notification_sender = Arc::clone(&self.notification_sender);
 
         self.runtime.spawn(async move {
-            {
+            let running_snapshot = {
                 let mut tasks_guard = tasks.write().unwrap();
-                let Some(state) = tasks_guard.get_mut(&task_id) else {
-                    return;
-                };
-                if state.cancel_requested {
-                    return;
+                match tasks_guard.get_mut(&task_id) {
+                    Some(state) => {
+                        if state.cancel_requested || !transition_state(state, TaskStatus::Running) {
+                            None
+                        } else {
+                            Some(TaskStatusSnapshot::from(state))
+                        }
+                    }
+                    None => None,
                 }
-                state.info.status = TaskStatus::Running;
-                state.info.started_at = Some(chrono::Utc::now().to_rfc3339());
-            }
+            };
+
+            notify_snapshot(&notification_sender, running_snapshot);
 
             let task_future = {
                 let handlers_guard = handlers.read().unwrap();
                 let Some(handler) = handlers_guard.get(&task_type) else {
-                    let mut tasks_guard = tasks.write().unwrap();
-                    if let Some(state) = tasks_guard.get_mut(&task_id) {
-                        if !state.cancel_requested {
-                            let error_msg = format!("Unknown task type: {task_type}");
-                            state.info.status = TaskStatus::Failed;
-                            state.info.completed_at = Some(chrono::Utc::now().to_rfc3339());
-                            state.info.error = Some(error_msg.clone());
-                            state.result = Some(TaskResult {
-                                id: task_id.clone(),
-                                success: false,
-                                data: None,
-                                error: Some(error_msg),
-                            });
+                    let failure_snapshot = {
+                        let mut tasks_guard = tasks.write().unwrap();
+                        match tasks_guard.get_mut(&task_id) {
+                            Some(state) => {
+                                if !state.cancel_requested {
+                                    let error_msg = format!("Unknown task type: {task_type}");
+                                    state.info.status = TaskStatus::Failed;
+                                    state.info.completed_at = Some(chrono::Utc::now().to_rfc3339());
+                                    state.info.error = Some(error_msg.clone());
+                                    state.result = Some(TaskResult {
+                                        id: task_id.clone(),
+                                        success: false,
+                                        data: None,
+                                        error: Some(error_msg),
+                                    });
+                                    Some(TaskStatusSnapshot::from(state))
+                                } else {
+                                    None
+                                }
+                            }
+                            None => None,
                         }
-                    }
+                    };
+                    notify_snapshot(&notification_sender, failure_snapshot);
                     return;
                 };
                 (handler)(&task_cx, params)
@@ -255,39 +343,49 @@ impl TaskManager {
 
             let result = task_future.await;
 
-            let mut tasks_guard = tasks.write().unwrap();
-            let Some(state) = tasks_guard.get_mut(&task_id) else {
-                return;
+            let completion_snapshot = {
+                let mut tasks_guard = tasks.write().unwrap();
+                match tasks_guard.get_mut(&task_id) {
+                    Some(state) => {
+                        if state.cancel_requested {
+                            None
+                        } else {
+                            let mut snapshot = None;
+                            match result {
+                                Ok(data) => {
+                                    if transition_state(state, TaskStatus::Completed) {
+                                        state.info.progress = Some(1.0);
+                                        state.result = Some(TaskResult {
+                                            id: task_id.clone(),
+                                            success: true,
+                                            data: Some(data),
+                                            error: None,
+                                        });
+                                        snapshot = Some(TaskStatusSnapshot::from(state));
+                                    }
+                                }
+                                Err(err) => {
+                                    let error_msg = err.message;
+                                    if transition_state(state, TaskStatus::Failed) {
+                                        state.info.error = Some(error_msg.clone());
+                                        state.result = Some(TaskResult {
+                                            id: task_id.clone(),
+                                            success: false,
+                                            data: None,
+                                            error: Some(error_msg),
+                                        });
+                                        snapshot = Some(TaskStatusSnapshot::from(state));
+                                    }
+                                }
+                            }
+                            snapshot
+                        }
+                    }
+                    None => None,
+                }
             };
-            if state.cancel_requested {
-                return;
-            }
 
-            match result {
-                Ok(data) => {
-                    state.info.status = TaskStatus::Completed;
-                    state.info.completed_at = Some(chrono::Utc::now().to_rfc3339());
-                    state.info.progress = Some(1.0);
-                    state.result = Some(TaskResult {
-                        id: task_id.clone(),
-                        success: true,
-                        data: Some(data),
-                        error: None,
-                    });
-                }
-                Err(err) => {
-                    let error_msg = err.message;
-                    state.info.status = TaskStatus::Failed;
-                    state.info.completed_at = Some(chrono::Utc::now().to_rfc3339());
-                    state.info.error = Some(error_msg.clone());
-                    state.result = Some(TaskResult {
-                        id: task_id.clone(),
-                        success: false,
-                        data: None,
-                        error: Some(error_msg),
-                    });
-                }
-            }
+            notify_snapshot(&notification_sender, completion_snapshot);
         });
     }
 
@@ -295,67 +393,102 @@ impl TaskManager {
     ///
     /// This is called internally to transition a task from Pending to Running.
     pub fn start_task(&self, task_id: &TaskId) -> McpResult<()> {
-        let mut tasks = self.tasks.write().unwrap();
-        let state = tasks
-            .get_mut(task_id)
-            .ok_or_else(|| McpError::invalid_params(format!("Task not found: {task_id}")))?;
+        let snapshot = {
+            let mut tasks = self.tasks.write().unwrap();
+            let state = tasks
+                .get_mut(task_id)
+                .ok_or_else(|| McpError::invalid_params(format!("Task not found: {task_id}")))?;
 
-        if state.info.status != TaskStatus::Pending {
-            return Err(McpError::invalid_params(format!(
-                "Task {task_id} is not pending"
-            )));
-        }
+            if state.info.status != TaskStatus::Pending {
+                return Err(McpError::invalid_params(format!(
+                    "Task {task_id} is not pending"
+                )));
+            }
 
-        state.info.status = TaskStatus::Running;
-        state.info.started_at = Some(chrono::Utc::now().to_rfc3339());
+            if !transition_state(state, TaskStatus::Running) {
+                return Err(McpError::invalid_params(format!(
+                    "Task {task_id} cannot transition to running"
+                )));
+            }
+            Some(TaskStatusSnapshot::from(state))
+        };
 
+        self.notify_snapshot(snapshot);
         Ok(())
     }
 
     /// Updates progress for a running task.
     pub fn update_progress(&self, task_id: &TaskId, progress: f64, message: Option<String>) {
-        let mut tasks = self.tasks.write().unwrap();
-        if let Some(state) = tasks.get_mut(task_id) {
-            if state.info.status == TaskStatus::Running {
+        let snapshot = {
+            let mut tasks = self.tasks.write().unwrap();
+            if let Some(state) = tasks.get_mut(task_id) {
+                if state.info.status != TaskStatus::Running {
+                    debug!(
+                        target: targets::SERVER,
+                        "task {} progress update ignored in state {:?}",
+                        task_id,
+                        state.info.status
+                    );
+                    return;
+                }
                 state.info.progress = Some(progress.clamp(0.0, 1.0));
                 state.info.message = message;
+                Some(TaskStatusSnapshot::from(state))
+            } else {
+                None
             }
-        }
+        };
+
+        self.notify_snapshot(snapshot);
     }
 
     /// Completes a task with a successful result.
     pub fn complete_task(&self, task_id: &TaskId, data: serde_json::Value) {
-        let mut tasks = self.tasks.write().unwrap();
-        if let Some(state) = tasks.get_mut(task_id) {
-            let now = chrono::Utc::now().to_rfc3339();
-            state.info.status = TaskStatus::Completed;
-            state.info.completed_at = Some(now);
-            state.info.progress = Some(1.0);
-            state.result = Some(TaskResult {
-                id: task_id.clone(),
-                success: true,
-                data: Some(data),
-                error: None,
-            });
-        }
+        let snapshot = {
+            let mut tasks = self.tasks.write().unwrap();
+            if let Some(state) = tasks.get_mut(task_id) {
+                if !transition_state(state, TaskStatus::Completed) {
+                    return;
+                }
+                state.info.progress = Some(1.0);
+                state.result = Some(TaskResult {
+                    id: task_id.clone(),
+                    success: true,
+                    data: Some(data),
+                    error: None,
+                });
+                Some(TaskStatusSnapshot::from(state))
+            } else {
+                None
+            }
+        };
+
+        self.notify_snapshot(snapshot);
     }
 
     /// Fails a task with an error.
     pub fn fail_task(&self, task_id: &TaskId, error: impl Into<String>) {
         let error = error.into();
-        let mut tasks = self.tasks.write().unwrap();
-        if let Some(state) = tasks.get_mut(task_id) {
-            let now = chrono::Utc::now().to_rfc3339();
-            state.info.status = TaskStatus::Failed;
-            state.info.completed_at = Some(now);
-            state.info.error = Some(error.clone());
-            state.result = Some(TaskResult {
-                id: task_id.clone(),
-                success: false,
-                data: None,
-                error: Some(error),
-            });
-        }
+        let snapshot = {
+            let mut tasks = self.tasks.write().unwrap();
+            if let Some(state) = tasks.get_mut(task_id) {
+                if !transition_state(state, TaskStatus::Failed) {
+                    return;
+                }
+                state.info.error = Some(error.clone());
+                state.result = Some(TaskResult {
+                    id: task_id.clone(),
+                    success: false,
+                    data: None,
+                    error: Some(error),
+                });
+                Some(TaskStatusSnapshot::from(state))
+            } else {
+                None
+            }
+        };
+
+        self.notify_snapshot(snapshot);
     }
 
     /// Gets information about a task.
@@ -388,35 +521,54 @@ impl TaskManager {
     /// Returns true if the task exists and cancellation was requested.
     /// The task may still be running until it checks for cancellation.
     pub fn cancel(&self, task_id: &TaskId, reason: Option<String>) -> McpResult<TaskInfo> {
-        let mut tasks = self.tasks.write().unwrap();
-        let state = tasks
-            .get_mut(task_id)
-            .ok_or_else(|| McpError::invalid_params(format!("Task not found: {task_id}")))?;
+        let snapshot = {
+            let mut tasks = self.tasks.write().unwrap();
+            let state = tasks
+                .get_mut(task_id)
+                .ok_or_else(|| McpError::invalid_params(format!("Task not found: {task_id}")))?;
 
-        // Can only cancel pending or running tasks
-        if state.info.status.is_terminal() {
-            return Err(McpError::invalid_params(format!(
-                "Task {task_id} is already in terminal state: {:?}",
-                state.info.status
-            )));
-        }
+            // Can only cancel pending or running tasks
+            if state.info.status.is_terminal() {
+                return Err(McpError::invalid_params(format!(
+                    "Task {task_id} is already in terminal state: {:?}",
+                    state.info.status
+                )));
+            }
 
-        state.cancel_requested = true;
-        state.info.status = TaskStatus::Cancelled;
-        state.info.completed_at = Some(chrono::Utc::now().to_rfc3339());
+            if !transition_state(state, TaskStatus::Cancelled) {
+                return Err(McpError::invalid_params(format!(
+                    "Task {task_id} cannot be cancelled from {:?}",
+                    state.info.status
+                )));
+            }
 
-        state.cx.cancel_with(CancelKind::User, None);
+            state.cancel_requested = true;
 
-        let error_msg = reason.unwrap_or_else(|| "Cancelled by request".to_string());
-        state.info.error = Some(error_msg.clone());
-        state.result = Some(TaskResult {
-            id: task_id.clone(),
-            success: false,
-            data: None,
-            error: Some(error_msg),
-        });
+            state.cx.cancel_with(CancelKind::User, None);
+            if !state.cx.is_cancel_requested() {
+                warn!(
+                    target: targets::SERVER,
+                    "task {} cancel signal not observed on context",
+                    task_id
+                );
+            }
 
-        Ok(state.info.clone())
+            let error_msg = reason.unwrap_or_else(|| "Cancelled by request".to_string());
+            state.info.error = Some(error_msg.clone());
+            state.result = Some(TaskResult {
+                id: task_id.clone(),
+                success: false,
+                data: None,
+                error: Some(error_msg),
+            });
+
+            let snapshot = TaskStatusSnapshot::from(state);
+            (snapshot, state.info.clone())
+        };
+
+        let (snapshot, info) = snapshot;
+        self.notify_snapshot(Some(snapshot));
+        Ok(info)
     }
 
     /// Checks if cancellation has been requested for a task.
@@ -464,6 +616,105 @@ impl TaskManager {
             true
         });
     }
+
+    fn notify_snapshot(&self, snapshot: Option<TaskStatusSnapshot>) {
+        if let Some(snapshot) = snapshot {
+            self.notify_status(snapshot.info, snapshot.result);
+        }
+    }
+
+    fn notify_status(&self, info: TaskInfo, result: Option<TaskResult>) {
+        let sender = {
+            let guard = self
+                .notification_sender
+                .read()
+                .expect("task notification sender lock poisoned");
+            guard.clone()
+        };
+        let Some(sender) = sender else {
+            return;
+        };
+
+        let params = TaskStatusNotificationParams {
+            id: info.id.clone(),
+            status: info.status,
+            progress: info.progress,
+            message: info.message.clone(),
+            error: info.error.clone(),
+            result,
+        };
+        let payload = match serde_json::to_value(params) {
+            Ok(value) => value,
+            Err(err) => {
+                warn!(
+                    target: targets::SERVER,
+                    "failed to serialize task status notification: {}",
+                    err
+                );
+                return;
+            }
+        };
+        sender(JsonRpcRequest::notification(
+            "notifications/tasks/status",
+            Some(payload),
+        ));
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TaskStatusSnapshot {
+    info: TaskInfo,
+    result: Option<TaskResult>,
+}
+
+impl TaskStatusSnapshot {
+    fn from(state: &TaskState) -> Self {
+        Self {
+            info: state.info.clone(),
+            result: state.result.clone(),
+        }
+    }
+}
+
+fn notify_snapshot(
+    sender: &Arc<RwLock<Option<TaskNotificationSender>>>,
+    snapshot: Option<TaskStatusSnapshot>,
+) {
+    let Some(snapshot) = snapshot else {
+        return;
+    };
+    let sender = {
+        let guard = sender
+            .read()
+            .expect("task notification sender lock poisoned");
+        guard.clone()
+    };
+    let Some(sender) = sender else {
+        return;
+    };
+    let params = TaskStatusNotificationParams {
+        id: snapshot.info.id.clone(),
+        status: snapshot.info.status,
+        progress: snapshot.info.progress,
+        message: snapshot.info.message.clone(),
+        error: snapshot.info.error.clone(),
+        result: snapshot.result,
+    };
+    let payload = match serde_json::to_value(params) {
+        Ok(value) => value,
+        Err(err) => {
+            warn!(
+                target: targets::SERVER,
+                "failed to serialize task status notification: {}",
+                err
+            );
+            return;
+        }
+    };
+    sender(JsonRpcRequest::notification(
+        "notifications/tasks/status",
+        Some(payload),
+    ));
 }
 
 impl Default for TaskManager {
@@ -479,11 +730,13 @@ impl std::fmt::Debug for TaskManager {
         f.debug_struct("TaskManager")
             .field("task_count", &tasks.len())
             .field("handler_count", &handlers.len())
+            .field("task_counter", &self.task_counter.load(Ordering::SeqCst))
             .field(
                 "list_changed_notifications",
                 &self.list_changed_notifications,
             )
-            .finish()
+            .field("auto_execute", &self.auto_execute)
+            .finish_non_exhaustive()
     }
 }
 
@@ -493,6 +746,8 @@ pub type SharedTaskManager = Arc<TaskManager>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::thread;
 
     #[test]
     fn test_task_manager_creation() {
@@ -698,5 +953,98 @@ mod tests {
 
         manager.update_progress(&task_id, 0.75, None);
         assert_eq!(manager.get_info(&task_id).unwrap().progress, Some(0.75));
+    }
+
+    #[test]
+    fn test_invalid_transition_rejected() {
+        let manager = TaskManager::new_for_testing();
+        let cx = Cx::for_testing();
+
+        manager.register_handler("transition_test", |_cx, _params| async {
+            Ok(serde_json::json!({}))
+        });
+
+        let task_id = manager.submit(&cx, "transition_test", None).unwrap();
+
+        // Completing before running should be ignored.
+        manager.complete_task(&task_id, serde_json::json!({"result": "noop"}));
+        let info = manager.get_info(&task_id).unwrap();
+        assert_eq!(info.status, TaskStatus::Pending);
+
+        manager.start_task(&task_id).unwrap();
+        manager.complete_task(&task_id, serde_json::json!({"result": "ok"}));
+        let info = manager.get_info(&task_id).unwrap();
+        assert_eq!(info.status, TaskStatus::Completed);
+
+        // Starting after completion should fail.
+        let result = manager.start_task(&task_id);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_concurrent_submissions() {
+        let manager = Arc::new(TaskManager::new_for_testing());
+        manager.register_handler("concurrent_test", |_cx, _params| async {
+            Ok(serde_json::json!({}))
+        });
+
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let manager = Arc::clone(&manager);
+            handles.push(thread::spawn(move || {
+                let cx = Cx::for_testing();
+                for _ in 0..10 {
+                    let _ = manager.submit(&cx, "concurrent_test", None).unwrap();
+                }
+            }));
+        }
+
+        for handle in handles {
+            handle.join().expect("thread join failed");
+        }
+
+        assert_eq!(manager.total_count(), 40);
+        assert_eq!(manager.list_tasks(Some(TaskStatus::Pending)).len(), 40);
+    }
+
+    #[test]
+    fn test_task_status_notifications() {
+        let manager = TaskManager::new_for_testing();
+        manager.register_handler("notify_test", |_cx, _params| async {
+            Ok(serde_json::json!({"ok": true}))
+        });
+
+        let events: Arc<std::sync::Mutex<Vec<TaskStatusNotificationParams>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sender_events = Arc::clone(&events);
+        let sender: TaskNotificationSender = Arc::new(move |request| {
+            if request.method != "notifications/tasks/status" {
+                return;
+            }
+            let params = request
+                .params
+                .as_ref()
+                .and_then(|value| serde_json::from_value(value.clone()).ok())
+                .expect("task status params");
+            sender_events
+                .lock()
+                .expect("events lock poisoned")
+                .push(params);
+        });
+        manager.set_notification_sender(sender);
+
+        let cx = Cx::for_testing();
+        let task_id = manager.submit(&cx, "notify_test", None).unwrap();
+        manager.start_task(&task_id).unwrap();
+        manager.update_progress(&task_id, 0.5, Some("half".to_string()));
+        manager.complete_task(&task_id, serde_json::json!({"result": 1}));
+
+        let recorded = events.lock().expect("events lock poisoned").clone();
+        assert!(!recorded.is_empty(), "expected task status notifications");
+        assert_eq!(recorded[0].id, task_id);
+        assert_eq!(recorded[0].status, TaskStatus::Pending);
+        assert_eq!(recorded[1].status, TaskStatus::Running);
+        assert_eq!(recorded[2].progress, Some(0.5));
+        assert_eq!(recorded.last().expect("last").status, TaskStatus::Completed);
     }
 }

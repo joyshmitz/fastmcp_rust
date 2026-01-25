@@ -2,6 +2,17 @@
 //!
 //! This provides a minimal, synchronous middleware system for MCP requests.
 //! Middleware can short-circuit requests, transform responses, and rewrite errors.
+//!
+//! # Ordering Semantics
+//!
+//! - `on_request` runs **in registration order** (first registered, first called).
+//! - `on_response` runs **in reverse order** for middleware whose `on_request` ran.
+//! - `on_error` runs **in reverse order** for middleware whose `on_request` ran.
+//!
+//! If a middleware returns `Respond` from `on_request`, the response is still
+//! passed through `on_response` for the already-entered middleware stack.
+//! If any `on_request` or `on_response` returns an error, `on_error` is invoked
+//! for the entered middleware stack to allow error rewriting.
 
 use fastmcp_core::{McpContext, McpError, McpResult};
 use fastmcp_protocol::JsonRpcRequest;
@@ -18,7 +29,8 @@ pub enum MiddlewareDecision {
 /// Middleware hook trait for request/response interception.
 ///
 /// This is intentionally minimal: synchronous hooks only, with simple
-/// short-circuit and response transform capabilities.
+/// short-circuit and response transform capabilities. See the module-level
+/// documentation for ordering semantics.
 pub trait Middleware: Send + Sync {
     /// Invoked before routing the request.
     ///

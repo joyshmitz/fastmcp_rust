@@ -19,3 +19,6 @@ serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+jwt = ["fastmcp-server/jwt"]

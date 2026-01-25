@@ -412,7 +412,11 @@ impl ServerBuilder {
     #[must_use]
     pub fn with_task_manager(mut self, task_manager: SharedTaskManager) -> Self {
         self.task_manager = Some(task_manager);
-        self.capabilities.tasks = Some(TasksCapability::default());
+        let mut capability = TasksCapability::default();
+        if let Some(manager) = &self.task_manager {
+            capability.list_changed = manager.has_list_changed_notifications();
+        }
+        self.capabilities.tasks = Some(capability);
         self
     }
 

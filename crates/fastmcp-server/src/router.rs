@@ -693,6 +693,14 @@ struct UriTemplate {
     segments: Vec<UriSegment>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UriTemplateError {
+    UnclosedParam,
+    UnmatchedClose,
+    EmptyParam,
+    DuplicateParam(String),
+}
+
 #[derive(Debug, Clone)]
 enum UriSegment {
     Literal(String),
@@ -701,32 +709,59 @@ enum UriSegment {
 
 impl UriTemplate {
     fn new(pattern: &str) -> Self {
+        Self::parse(pattern).expect("invalid URI template")
+    }
+
+    fn parse(pattern: &str) -> Result<Self, UriTemplateError> {
         let mut segments = Vec::new();
         let mut literal = String::new();
         let mut chars = pattern.chars().peekable();
+        let mut seen = std::collections::HashSet::new();
 
         while let Some(ch) = chars.next() {
-            if ch == '{' {
-                if !literal.is_empty() {
-                    segments.push(UriSegment::Literal(std::mem::take(&mut literal)));
-                }
-
-                let mut name = String::new();
-                for next in chars.by_ref() {
-                    if next == '}' {
-                        break;
+            match ch {
+                '{' => {
+                    if matches!(chars.peek(), Some('{')) {
+                        let _ = chars.next();
+                        literal.push('{');
+                        continue;
                     }
-                    name.push(next);
-                }
 
-                if name.is_empty() {
-                    literal.push('{');
-                    literal.push('}');
-                } else {
+                    if !literal.is_empty() {
+                        segments.push(UriSegment::Literal(std::mem::take(&mut literal)));
+                    }
+
+                    let mut name = String::new();
+                    let mut closed = false;
+                    for next in chars.by_ref() {
+                        if next == '}' {
+                            closed = true;
+                            break;
+                        }
+                        name.push(next);
+                    }
+
+                    if !closed {
+                        return Err(UriTemplateError::UnclosedParam);
+                    }
+
+                    if name.is_empty() {
+                        return Err(UriTemplateError::EmptyParam);
+                    }
+                    if !seen.insert(name.clone()) {
+                        return Err(UriTemplateError::DuplicateParam(name));
+                    }
                     segments.push(UriSegment::Param(name));
                 }
-            } else {
-                literal.push(ch);
+                '}' => {
+                    if matches!(chars.peek(), Some('}')) {
+                        let _ = chars.next();
+                        literal.push('}');
+                        continue;
+                    }
+                    return Err(UriTemplateError::UnmatchedClose);
+                }
+                _ => literal.push(ch),
             }
         }
 
@@ -734,10 +769,10 @@ impl UriTemplate {
             segments.push(UriSegment::Literal(literal));
         }
 
-        Self {
+        Ok(Self {
             pattern: pattern.to_string(),
             segments,
-        }
+        })
     }
 
     fn specificity(&self) -> (usize, usize, usize) {
@@ -775,10 +810,18 @@ impl UriTemplate {
                     if let Some(literal) = next_literal {
                         let idx = remainder.find(literal)?;
                         let value = &remainder[..idx];
-                        params.insert(name.clone(), value.to_string());
+                        if value.is_empty() {
+                            return None;
+                        }
+                        let value = percent_decode(value)?;
+                        params.insert(name.clone(), value);
                         remainder = &remainder[idx..];
                     } else {
-                        params.insert(name.clone(), remainder.to_string());
+                        if remainder.is_empty() {
+                            return None;
+                        }
+                        let value = percent_decode(remainder)?;
+                        params.insert(name.clone(), value);
                         remainder = "";
                     }
                 }
@@ -790,5 +833,107 @@ impl UriTemplate {
         } else {
             None
         }
+    }
+}
+
+fn percent_decode(input: &str) -> Option<String> {
+    if !input.as_bytes().contains(&b'%') {
+        return Some(input.to_string());
+    }
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' => {
+                if i + 2 >= bytes.len() {
+                    return None;
+                }
+                let hi = bytes[i + 1];
+                let lo = bytes[i + 2];
+                let value = (from_hex(hi)? << 4) | from_hex(lo)?;
+                out.push(value);
+                i += 3;
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+fn from_hex(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod uri_template_tests {
+    use super::{UriTemplate, UriTemplateError};
+
+    #[test]
+    fn uri_template_matches_simple_param() {
+        let matcher = UriTemplate::new("file://{path}");
+        let params = matcher.matches("file://foo").expect("match");
+        assert_eq!(params.get("path").map(String::as_str), Some("foo"));
+    }
+
+    #[test]
+    fn uri_template_allows_slash_in_trailing_param() {
+        let matcher = UriTemplate::new("file://{path}");
+        let params = matcher.matches("file://foo/bar").expect("match");
+        assert_eq!(params.get("path").map(String::as_str), Some("foo/bar"));
+    }
+
+    #[test]
+    fn uri_template_matches_multiple_params() {
+        let matcher = UriTemplate::new("db://{table}/{id}");
+        let params = matcher.matches("db://users/42").expect("match");
+        assert_eq!(params.get("table").map(String::as_str), Some("users"));
+        assert_eq!(params.get("id").map(String::as_str), Some("42"));
+    }
+
+    #[test]
+    fn uri_template_rejects_extra_segments() {
+        let matcher = UriTemplate::new("db://{table}/{id}");
+        assert!(matcher.matches("db://users/42/extra").is_none());
+    }
+
+    #[test]
+    fn uri_template_decodes_percent_encoded_values() {
+        let matcher = UriTemplate::new("file://{path}");
+        let params = matcher.matches("file://foo%2Fbar").expect("match");
+        assert_eq!(params.get("path").map(String::as_str), Some("foo/bar"));
+    }
+
+    #[test]
+    fn uri_template_supports_escaped_braces() {
+        let matcher = UriTemplate::new("file://{{literal}}/{id}");
+        let params = matcher.matches("file://{literal}/123").expect("match");
+        assert_eq!(params.get("id").map(String::as_str), Some("123"));
+    }
+
+    #[test]
+    fn uri_template_rejects_empty_param() {
+        let err = UriTemplate::parse("file://{}/x").unwrap_err();
+        assert_eq!(err, UriTemplateError::EmptyParam);
+    }
+
+    #[test]
+    fn uri_template_rejects_unmatched_close() {
+        let err = UriTemplate::parse("file://}x").unwrap_err();
+        assert_eq!(err, UriTemplateError::UnmatchedClose);
+    }
+
+    #[test]
+    fn uri_template_rejects_duplicate_params() {
+        let err = UriTemplate::parse("db://{id}/{id}").unwrap_err();
+        assert_eq!(err, UriTemplateError::DuplicateParam("id".to_string()));
     }
 }
