@@ -33,8 +33,7 @@ Desktop.ini
 .env.*
 !.env.example
 
-# Beads issue tracker (local)
-.beads/
+# Beads viewer local config
 .bv/
 
 # Large original images (webp versions are committed)
