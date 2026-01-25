@@ -176,9 +176,17 @@ impl<R: Read> WsReader<R> {
         self.reader.read_exact(&mut header)?;
 
         let fin = (header[0] & 0x80) != 0;
+        let rsv = header[0] & 0x70;
         let opcode = header[0] & 0x0F;
         let masked = (header[1] & 0x80) != 0;
         let mut payload_len = (header[1] & 0x7F) as u64;
+
+        if rsv != 0 {
+            return Err(TransportError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "WebSocket RSV bits set but no extensions are supported",
+            )));
+        }
 
         // Extended payload length
         if payload_len == 126 {
@@ -191,14 +199,19 @@ impl<R: Read> WsReader<R> {
             payload_len = u64::from_be_bytes(ext);
         }
 
-        // Read masking key if present (client -> server frames are masked)
-        let mask_key = if masked {
-            let mut key = [0u8; 4];
-            self.reader.read_exact(&mut key)?;
-            Some(key)
-        } else {
-            None
-        };
+        let is_control = matches!(opcode, 0x08..=0x0A);
+        if is_control && !fin {
+            return Err(TransportError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Fragmented control frames are not allowed",
+            )));
+        }
+        if is_control && payload_len > 125 {
+            return Err(TransportError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Control frame payload too large",
+            )));
+        }
 
         let max_frame_size = self.max_frame_size as u64;
         if payload_len > max_frame_size {
@@ -213,6 +226,15 @@ impl<R: Read> WsReader<R> {
                 "WebSocket frame length exceeds platform limits",
             )));
         }
+
+        // Read masking key if present (client -> server frames are masked)
+        let mask_key = if masked {
+            let mut key = [0u8; 4];
+            self.reader.read_exact(&mut key)?;
+            Some(key)
+        } else {
+            None
+        };
 
         // Read payload
         let mut payload = vec![0u8; payload_len as usize];
@@ -979,6 +1001,49 @@ mod tests {
         let mut reader = WsReader::new(Cursor::new(buffer));
         reader.max_frame_size = 2;
 
+        let err = reader.read_frame().unwrap_err();
+        assert!(matches!(
+            err,
+            TransportError::Io(ref e) if e.kind() == std::io::ErrorKind::InvalidData
+        ));
+    }
+
+    #[test]
+    fn test_reader_rejects_control_frame_over_125() {
+        let mut buffer = Vec::new();
+        buffer.push(0x89); // FIN + Ping opcode
+        buffer.push(126); // Extended length (not allowed for control frames)
+        buffer.extend_from_slice(&126u16.to_be_bytes());
+
+        let mut reader = WsReader::new(Cursor::new(buffer));
+        let err = reader.read_frame().unwrap_err();
+        assert!(matches!(
+            err,
+            TransportError::Io(ref e) if e.kind() == std::io::ErrorKind::InvalidData
+        ));
+    }
+
+    #[test]
+    fn test_reader_rejects_fragmented_control_frame() {
+        let mut buffer = Vec::new();
+        buffer.push(0x09); // FIN=0 + Ping opcode
+        buffer.push(0x00); // Zero payload
+
+        let mut reader = WsReader::new(Cursor::new(buffer));
+        let err = reader.read_frame().unwrap_err();
+        assert!(matches!(
+            err,
+            TransportError::Io(ref e) if e.kind() == std::io::ErrorKind::InvalidData
+        ));
+    }
+
+    #[test]
+    fn test_reader_rejects_rsv_bits() {
+        let mut buffer = Vec::new();
+        buffer.push(0xC1); // FIN + RSV1 + Text opcode
+        buffer.push(0x00); // Zero payload
+
+        let mut reader = WsReader::new(Cursor::new(buffer));
         let err = reader.read_frame().unwrap_err();
         assert!(matches!(
             err,
