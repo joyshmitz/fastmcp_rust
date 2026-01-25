@@ -212,9 +212,7 @@ impl TokenVerifier for StaticTokenVerifier {
         };
 
         let mut ctx = auth.clone();
-        if ctx.token.is_none() {
-            ctx.token = Some(token.clone());
-        }
+        ctx.token.get_or_insert_with(|| token.clone());
         Ok(ctx)
     }
 }

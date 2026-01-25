@@ -5,9 +5,15 @@
 //!
 //! # Available Combinators
 //!
-//! - [`join_all`]: Wait for all operations to complete (N-of-N)
-//! - [`race`]: Return first to complete, cancel others (1-of-N)
-//! - [`quorum`]: Wait for M of N to complete (M-of-N)
+//! | Function | Pattern | Description |
+//! |----------|---------|-------------|
+//! | [`join_all`] | N-of-N | Wait for all futures to complete |
+//! | [`join_all_results`] | N-of-N | Wait for all, collect `McpResult<T>` |
+//! | [`race`] | 1-of-N | Return first to complete |
+//! | [`race_timeout`] | 1-of-N | Race with timeout |
+//! | [`quorum`] | M-of-N | Wait for M successes out of N |
+//! | [`quorum_timeout`] | M-of-N | Quorum with timeout |
+//! | [`first_ok`] | 1-of-N | Return first successful result |
 //!
 //! # Cancel-Correctness
 //!
@@ -17,16 +23,19 @@
 //! # Example
 //!
 //! ```ignore
-//! use fastmcp_core::combinator::{join_all, race, quorum};
+//! use fastmcp_core::combinator::{join_all, race, quorum, first_ok};
 //!
 //! // Wait for all to complete
 //! let results = join_all(ctx.cx(), vec![fut1, fut2, fut3]).await;
 //!
 //! // Return first to complete
-//! let winner = race(ctx.cx(), vec![fut1, fut2, fut3]).await;
+//! let winner = race(ctx.cx(), vec![fut1, fut2, fut3]).await?;
 //!
 //! // Wait for 2 of 3 to succeed
-//! let quorum_result = quorum(ctx.cx(), 2, vec![fut1, fut2, fut3]).await;
+//! let quorum_result = quorum(ctx.cx(), 2, vec![fut1, fut2, fut3]).await?;
+//!
+//! // Return first success (skip failures)
+//! let result = first_ok(ctx.cx(), vec![try1, try2, try3]).await?;
 //! ```
 
 use std::future::Future;
@@ -55,8 +64,11 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 ///
 /// # Cancel-Correctness
 ///
-/// If any future is cancelled or panics, the combinator will still
-/// await all remaining futures to completion before returning.
+/// In Phase 1+, if any future is cancelled or panics, the combinator
+/// will still await all remaining futures to completion before returning.
+///
+/// **Phase 0 note:** Currently uses sequential execution, so futures run
+/// one at a time and panics propagate immediately.
 ///
 /// # Example
 ///
@@ -112,14 +124,21 @@ pub async fn join_all_results<T: Send + 'static>(
 ///
 /// # Cancel-Correctness
 ///
-/// Losing futures are properly cancelled and awaited to ensure no
-/// orphan tasks remain.
+/// In Phase 1+, losing futures are properly cancelled and awaited to
+/// ensure no orphan tasks remain.
+///
+/// **Phase 0 note:** Currently uses sequential execution, so only the
+/// first future runs and there are no losers to cancel.
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - No futures are provided
-/// - The winning future fails (error is propagated)
+/// Returns an error if no futures are provided.
+///
+/// # Note
+///
+/// This function takes futures returning `T` directly, not `McpResult<T>`.
+/// Use [`first_ok`] when your futures return `McpResult<T>` and you want
+/// to skip failures and return the first success.
 ///
 /// # Example
 ///
@@ -131,23 +150,16 @@ pub async fn join_all_results<T: Send + 'static>(
 /// let result = race(ctx.cx(), futures).await?;
 /// ```
 pub async fn race<T: Send + 'static>(_cx: &Cx, futures: Vec<BoxFuture<'_, T>>) -> McpResult<T> {
-    if futures.is_empty() {
-        return Err(McpError::new(
-            McpErrorCode::InvalidParams,
-            "race requires at least one future",
-        ));
-    }
-
     // Phase 0: Sequential execution - first future wins
     // Phase 1+: Will use proper concurrent polling with cancellation
     let mut iter = futures.into_iter();
-    let Some(fut) = iter.next() else {
-        return Err(McpError::new(
+    match iter.next() {
+        Some(fut) => Ok(fut.await),
+        None => Err(McpError::new(
             McpErrorCode::InvalidParams,
             "race requires at least one future",
-        ));
-    };
-    Ok(fut.await)
+        )),
+    }
 }
 
 /// Races multiple futures with a timeout.
@@ -220,8 +232,11 @@ impl<T> QuorumResult<T> {
 ///
 /// # Cancel-Correctness
 ///
-/// Once quorum is reached (or impossible), remaining futures are
-/// cancelled and drained. No orphan tasks.
+/// In Phase 1+, once quorum is reached (or impossible), remaining futures
+/// are cancelled and drained. No orphan tasks.
+///
+/// **Phase 0 note:** Currently uses sequential execution, so remaining
+/// futures simply aren't started rather than being cancelled.
 ///
 /// # Special Cases
 ///
@@ -337,9 +352,12 @@ pub async fn quorum_timeout<T: Send + 'static>(
 
 /// Races futures and returns the first successful result.
 ///
-/// Unlike `race` which returns the first to complete (success or failure),
-/// `first_ok` returns the first to complete successfully. If all futures
-/// fail, returns the last error.
+/// This function takes futures that return `McpResult<T>` and tries them
+/// in sequence (Phase 0) or concurrently (Phase 1+), returning the first
+/// `Ok` value. If all futures return `Err`, the last error is returned.
+///
+/// Use this for fallback patterns where you want to try multiple sources
+/// and take the first success.
 ///
 /// # Example
 ///

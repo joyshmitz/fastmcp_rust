@@ -5,17 +5,28 @@
 use fastmcp_protocol::{JsonRpcMessage, JsonRpcRequest, JsonRpcResponse};
 
 /// Codec for encoding/decoding JSON-RPC messages.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Codec {
     /// Buffer for incomplete messages.
     buffer: Vec<u8>,
+    /// Maximum allowed message size in bytes.
+    max_message_size: usize,
+}
+
+impl Default for Codec {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Codec {
-    /// Creates a new codec.
+    /// Creates a new codec with default settings (10MB limit).
     #[must_use]
     pub fn new() -> Self {
-        Self { buffer: Vec::new() }
+        Self {
+            buffer: Vec::new(),
+            max_message_size: 10 * 1024 * 1024, // 10MB
+        }
     }
 
     /// Encodes a request to bytes.
@@ -46,8 +57,12 @@ impl Codec {
     ///
     /// # Errors
     ///
-    /// Returns an error if a complete line fails to parse.
+    /// Returns an error if a complete line fails to parse or if the buffer exceeds the limit.
     pub fn decode(&mut self, data: &[u8]) -> Result<Vec<JsonRpcMessage>, CodecError> {
+        if self.buffer.len() + data.len() > self.max_message_size {
+            return Err(CodecError::MessageTooLarge(self.buffer.len() + data.len()));
+        }
+
         self.buffer.extend_from_slice(data);
 
         let mut messages = Vec::new();
