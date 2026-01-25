@@ -65,7 +65,8 @@ pub use fastmcp_core::logging;
 pub use fastmcp_protocol::{
     CallToolParams, CallToolResult, ClientCapabilities, ClientInfo, Content, GetPromptParams,
     GetPromptResult, InitializeParams, InitializeResult, JsonRpcError, JsonRpcMessage,
-    JsonRpcRequest, JsonRpcResponse, ListPromptsParams, ListPromptsResult, ListResourcesParams,
+    JsonRpcRequest, JsonRpcResponse, ListPromptsParams, ListPromptsResult,
+    ListResourceTemplatesParams, ListResourceTemplatesResult, ListResourcesParams,
     ListResourcesResult, ListToolsParams, ListToolsResult, LogLevel, PROTOCOL_VERSION, Prompt,
     PromptArgument, PromptMessage, ReadResourceParams, ReadResourceResult, Resource,
     ResourceContent, ResourceTemplate, ResourcesCapability, Role, ServerCapabilities, ServerInfo,

@@ -13,8 +13,8 @@ use asupersync::{Budget, Cx};
 use fastmcp_core::{McpContext, McpError, McpResult};
 use fastmcp_protocol::{
     CallToolParams, ClientCapabilities, ClientInfo, Content, GetPromptParams, InitializeParams,
-    Prompt, PromptArgument, PromptMessage, ReadResourceParams, Resource, ResourceContent, Role,
-    ServerCapabilities, ServerInfo, Tool,
+    Prompt, PromptArgument, PromptMessage, ReadResourceParams, Resource, ResourceContent,
+    ResourceTemplate, Role, ServerCapabilities, ServerInfo, Tool,
 };
 
 use crate::handler::{PromptHandler, ResourceHandler, ToolHandler};
@@ -237,6 +237,14 @@ mod router_tests {
         });
         router.add_resource(CancellableResource);
 
+        // Register resource templates
+        router.add_resource_template(ResourceTemplate {
+            uri_template: "resource://{id}".to_string(),
+            name: "Template Resource".to_string(),
+            description: Some("Resource template for tests".to_string()),
+            mime_type: Some("text/plain".to_string()),
+        });
+
         // Register prompts
         router.add_prompt(GreetingPrompt);
 
@@ -278,6 +286,15 @@ mod router_tests {
         let resource_uris: Vec<_> = resources.iter().map(|r| r.uri.as_str()).collect();
         assert!(resource_uris.contains(&"resource://test"));
         assert!(resource_uris.contains(&"resource://cancellable"));
+    }
+
+    #[test]
+    fn test_router_resource_template_list() {
+        let router = create_test_router();
+        let templates = router.resource_templates();
+
+        assert_eq!(templates.len(), 1);
+        assert_eq!(templates[0].uri_template, "resource://{id}");
     }
 
     #[test]

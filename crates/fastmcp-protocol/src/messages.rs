@@ -164,6 +164,14 @@ pub struct ListResourcesResult {
     pub next_cursor: Option<String>,
 }
 
+/// resources/templates/list request params.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListResourceTemplatesParams {
+    /// Cursor for pagination.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+
 /// resources/templates/list response result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListResourceTemplatesResult {

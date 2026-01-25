@@ -284,17 +284,32 @@ pub fn init_console(enabled: bool) -> Result<(), &'static str> {
 // ─────────────────────────────────────────────────────────
 
 /// Strip markup tags from text (for plain output).
+///
+/// Handles escaped brackets (`[[` -> `[`) and strips valid tags (`[...]`).
 #[must_use]
 pub fn strip_markup(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut in_tag = false;
+    let mut chars = text.chars().peekable();
 
-    for ch in text.chars() {
+    while let Some(ch) = chars.next() {
         match ch {
-            '[' if !in_tag => in_tag = true,
-            ']' if in_tag => in_tag = false,
-            _ if !in_tag => out.push(ch),
-            _ => {}
+            '[' => {
+                // Check for escaped bracket [[
+                if let Some('[') = chars.peek() {
+                    out.push('[');
+                    chars.next(); // Consume the second [
+                } else {
+                    // It's a tag start, skip until ]
+                    // Note: This is a simple skippper; it doesn't handle nested brackets
+                    // or quoted strings inside tags, but covers standard style tags.
+                    for c in chars.by_ref() {
+                        if c == ']' {
+                            break;
+                        }
+                    }
+                }
+            }
+            _ => out.push(ch),
         }
     }
 

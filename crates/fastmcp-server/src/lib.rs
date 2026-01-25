@@ -44,8 +44,8 @@ pub use handler::{
 pub use router::{NotificationSender, Router};
 pub use session::Session;
 
-use std::io::Write;
-use std::sync::Arc;
+use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use asupersync::{Budget, Cx};
@@ -55,9 +55,12 @@ use fastmcp_core::McpError;
 use fastmcp_core::logging::{error, info, targets};
 use fastmcp_protocol::{
     CallToolParams, GetPromptParams, InitializeParams, JsonRpcError, JsonRpcMessage,
-    JsonRpcRequest, JsonRpcResponse, ListPromptsParams, ListResourcesParams, ListToolsParams,
-    Prompt, ReadResourceParams, RequestId, Resource, ServerCapabilities, ServerInfo, Tool,
+    JsonRpcRequest, JsonRpcResponse, ListPromptsParams, ListResourceTemplatesParams,
+    ListResourcesParams, ListToolsParams, Prompt, ReadResourceParams, RequestId, Resource,
+    ResourceTemplate, ServerCapabilities, ServerInfo, Tool,
 };
+use fastmcp_transport::sse::SseServerTransport;
+use fastmcp_transport::websocket::WsTransport;
 use fastmcp_transport::{Codec, StdioTransport, Transport, TransportError};
 use log::Level;
 
@@ -179,6 +182,12 @@ impl Server {
         self.router.resources()
     }
 
+    /// Lists all registered resource templates.
+    #[must_use]
+    pub fn resource_templates(&self) -> Vec<ResourceTemplate> {
+        self.router.resource_templates()
+    }
+
     /// Lists all registered prompts.
     #[must_use]
     pub fn prompts(&self) -> Vec<Prompt> {
@@ -285,9 +294,117 @@ impl Server {
         self.init_rich_logging();
 
         let mut transport = StdioTransport::stdio();
+
+        // Create a notification sender that writes to a separate stdout handle.
+        // This allows progress notifications to be sent during handler execution
+        // while the main transport is blocked on recv().
+        let notification_sender = create_notification_sender();
+
+        self.run_loop(
+            cx,
+            |cx| transport.recv(cx),
+            |cx, message| transport.send(cx, message),
+            notification_sender,
+        )
+    }
+
+    /// Runs the server on a custom transport with a testing Cx.
+    ///
+    /// This is useful for SSE/WebSocket integrations where the transport is
+    /// provided by an external server framework.
+    pub fn run_transport<T>(self, transport: T) -> !
+    where
+        T: Transport + Send + 'static,
+    {
+        let cx = Cx::for_testing();
+        self.run_transport_with_cx(&cx, transport)
+    }
+
+    /// Runs the server on a custom transport with a provided Cx.
+    ///
+    /// This allows integration with a real asupersync runtime.
+    pub fn run_transport_with_cx<T>(self, cx: &Cx, transport: T) -> !
+    where
+        T: Transport + Send + 'static,
+    {
+        self.init_rich_logging();
+
+        let shared = SharedTransport::new(transport);
+        let notification_sender = create_transport_notification_sender(shared.clone());
+
+        self.run_loop(
+            cx,
+            |cx| shared.recv(cx),
+            |cx, message| shared.send(cx, message),
+            notification_sender,
+        )
+    }
+
+    /// Runs the server using SSE transport with a testing Cx.
+    ///
+    /// This is a convenience wrapper around [`SseServerTransport`].
+    pub fn run_sse<W, R>(self, writer: W, request_source: R, endpoint_url: impl Into<String>) -> !
+    where
+        W: Write + Send + 'static,
+        R: Iterator<Item = JsonRpcRequest> + Send + 'static,
+    {
+        let transport = SseServerTransport::new(writer, request_source, endpoint_url);
+        self.run_transport(transport)
+    }
+
+    /// Runs the server using SSE transport with a provided Cx.
+    pub fn run_sse_with_cx<W, R>(
+        self,
+        cx: &Cx,
+        writer: W,
+        request_source: R,
+        endpoint_url: impl Into<String>,
+    ) -> !
+    where
+        W: Write + Send + 'static,
+        R: Iterator<Item = JsonRpcRequest> + Send + 'static,
+    {
+        let transport = SseServerTransport::new(writer, request_source, endpoint_url);
+        self.run_transport_with_cx(cx, transport)
+    }
+
+    /// Runs the server using WebSocket transport with a testing Cx.
+    ///
+    /// This is a convenience wrapper around [`WsTransport`].
+    pub fn run_websocket<R, W>(self, reader: R, writer: W) -> !
+    where
+        R: Read + Send + 'static,
+        W: Write + Send + 'static,
+    {
+        let transport = WsTransport::new(reader, writer);
+        self.run_transport(transport)
+    }
+
+    /// Runs the server using WebSocket transport with a provided Cx.
+    pub fn run_websocket_with_cx<R, W>(self, cx: &Cx, reader: R, writer: W) -> !
+    where
+        R: Read + Send + 'static,
+        W: Write + Send + 'static,
+    {
+        let transport = WsTransport::new(reader, writer);
+        self.run_transport_with_cx(cx, transport)
+    }
+
+    /// Shared server loop for any transport, using closure-based recv/send.
+    fn run_loop<R, S>(
+        self,
+        cx: &Cx,
+        mut recv: R,
+        mut send: S,
+        notification_sender: NotificationSender,
+    ) -> !
+    where
+        R: FnMut(&Cx) -> Result<JsonRpcMessage, TransportError>,
+        S: FnMut(&Cx, &JsonRpcMessage) -> Result<(), TransportError>,
+    {
         let mut session = Session::new(self.info.clone(), self.capabilities.clone());
 
-        // Track connection opened (stdio counts as a single connection)
+        // Track connection opened
         if let Some(ref stats) = self.stats {
             stats.connection_opened();
         }
@@ -296,11 +413,6 @@ impl Server {
         if self.console_config.show_banner && !banner_suppressed() {
             self.render_startup_banner();
         }
-
-        // Create a notification sender that writes to a separate stdout handle.
-        // This allows progress notifications to be sent during handler execution
-        // while the main transport is blocked on recv().
-        let notification_sender = create_notification_sender();
 
         // Main request loop
         loop {
@@ -314,7 +426,7 @@ impl Server {
             }
 
             // Receive next message
-            let message = match transport.recv(cx) {
+            let message = match recv(cx) {
                 Ok(msg) => msg,
                 Err(TransportError::Closed) => {
                     // Clean shutdown - track connection close
@@ -337,7 +449,7 @@ impl Server {
             };
 
             // Handle the message
-            let response = match message {
+            let response_opt = match message {
                 JsonRpcMessage::Request(request) => {
                     // Track bytes received (approximate from serialized request size)
                     if let Some(ref stats) = self.stats {
@@ -355,16 +467,18 @@ impl Server {
                 }
             };
 
-            // Track bytes sent (approximate from serialized response size)
-            if let Some(ref stats) = self.stats {
-                if let Ok(json) = serde_json::to_string(&response) {
-                    stats.add_bytes_sent(json.len() as u64 + 1); // +1 for newline
+            if let Some(response) = response_opt {
+                // Track bytes sent (approximate from serialized response size)
+                if let Some(ref stats) = self.stats {
+                    if let Ok(json) = serde_json::to_string(&response) {
+                        stats.add_bytes_sent(json.len() as u64 + 1); // +1 for newline
+                    }
                 }
-            }
 
-            // Send response
-            if let Err(e) = transport.send(cx, &JsonRpcMessage::Response(response)) {
-                error!(target: targets::TRANSPORT, "Failed to send response: {}", e);
+                // Send response
+                if let Err(e) = send(cx, &JsonRpcMessage::Response(response)) {
+                    error!(target: targets::TRANSPORT, "Failed to send response: {}", e);
+                }
             }
         }
     }
@@ -376,7 +490,7 @@ impl Server {
         session: &mut Session,
         request: JsonRpcRequest,
         notification_sender: &NotificationSender,
-    ) -> JsonRpcResponse {
+    ) -> Option<JsonRpcResponse> {
         let id = request.id.clone();
         let method = request.method.clone();
 
@@ -395,14 +509,18 @@ impl Server {
             if let Some(ref stats) = self.stats {
                 stats.record_request(&method, start_time.elapsed(), false);
             }
-            return JsonRpcResponse::error(
+            // If it's a notification, we don't send an error response
+            if id.is_none() {
+                return None;
+            }
+            return Some(JsonRpcResponse::error(
                 id,
                 JsonRpcError {
                     code: -32000,
                     message: "Request budget exhausted".to_string(),
                     data: None,
                 },
-            );
+            ));
         }
 
         // Dispatch based on method, passing the budget and notification sender
@@ -428,19 +546,33 @@ impl Server {
             }
         }
 
-        // For success, we need a non-None id; use a fallback for notifications
-        let response_id = id.clone().unwrap_or(RequestId::Number(0));
+        // If it's a notification (no ID), we must not reply
+        if id.is_none() {
+            if let Err(e) = result {
+                fastmcp_core::logging::error!(
+                    target: targets::HANDLER,
+                    "Notification '{}' failed: {}",
+                    method,
+                    e
+                );
+            }
+            return None;
+        }
+
+        // For success, we need a non-None id (checked above, so unwrap is safe-ish, but let's be correct)
+        // We only reach here if id is Some.
+        let response_id = id.clone().unwrap();
 
         match result {
-            Ok(value) => JsonRpcResponse::success(response_id, value),
-            Err(e) => JsonRpcResponse::error(
+            Ok(value) => Some(JsonRpcResponse::success(response_id, value)),
+            Err(e) => Some(JsonRpcResponse::error(
                 id,
                 JsonRpcError {
                     code: e.code.into(),
                     message: e.message,
                     data: e.data,
                 },
-            ),
+            )),
         }
     }
 
@@ -477,6 +609,15 @@ impl Server {
             return Err(McpError::internal_error("Request budget exhausted"));
         }
 
+        // Check initialization state
+        // Per MCP spec, client must send initialize first.
+        // We allow "ping" for health checks even before initialization.
+        if !session.is_initialized() && method != "initialize" && method != "ping" {
+            return Err(McpError::invalid_request(
+                "Server not initialized. Client must send 'initialize' first.",
+            ));
+        }
+
         match method {
             "initialize" => {
                 let params: InitializeParams = parse_params(params)?;
@@ -511,6 +652,11 @@ impl Server {
             "resources/list" => {
                 let params: ListResourcesParams = parse_params_or_default(params)?;
                 let result = self.router.handle_resources_list(cx, params)?;
+                Ok(serde_json::to_value(result).map_err(McpError::from)?)
+            }
+            "resources/templates/list" => {
+                let params: ListResourceTemplatesParams = parse_params_or_default(params)?;
+                let result = self.router.handle_resource_templates_list(cx, params)?;
                 Ok(serde_json::to_value(result).map_err(McpError::from)?)
             }
             "resources/read" => {
@@ -589,6 +735,54 @@ fn request_id_to_u64(id: Option<&RequestId>) -> u64 {
     }
 }
 
+#[derive(Clone)]
+struct SharedTransport<T> {
+    inner: Arc<Mutex<T>>,
+}
+
+impl<T: Transport> SharedTransport<T> {
+    fn new(transport: T) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(transport)),
+        }
+    }
+
+    fn recv(&self, cx: &Cx) -> Result<JsonRpcMessage, TransportError> {
+        let mut guard = self.inner.lock().map_err(|_| transport_lock_error())?;
+        guard.recv(cx)
+    }
+
+    fn send(&self, cx: &Cx, message: &JsonRpcMessage) -> Result<(), TransportError> {
+        let mut guard = self.inner.lock().map_err(|_| transport_lock_error())?;
+        guard.send(cx, message)
+    }
+}
+
+fn transport_lock_error() -> TransportError {
+    TransportError::Io(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        "transport lock poisoned",
+    ))
+}
+
+fn create_transport_notification_sender<T>(transport: SharedTransport<T>) -> NotificationSender
+where
+    T: Transport + Send + 'static,
+{
+    let cx = Cx::for_testing();
+
+    Arc::new(move |request: JsonRpcRequest| {
+        let message = JsonRpcMessage::Request(request);
+        if let Err(e) = transport.send(&cx, &message) {
+            log::error!(
+                target: targets::TRANSPORT,
+                "Failed to send notification: {}",
+                e
+            );
+        }
+    })
+}
+
 /// Creates a notification sender that writes JSON-RPC notifications to stdout.
 ///
 /// This creates a separate stdout handle for sending notifications, allowing
@@ -610,7 +804,7 @@ fn create_notification_sender() -> NotificationSender {
         let bytes = match codec.encode_request(&request) {
             Ok(b) => b,
             Err(e) => {
-                log::error!(target: "fastmcp::server", "Failed to encode notification: {}", e);
+                log::error!(target: targets::SERVER, "Failed to encode notification: {}", e);
                 return;
             }
         };
@@ -618,13 +812,13 @@ fn create_notification_sender() -> NotificationSender {
         // Write to stdout atomically
         if let Ok(mut stdout) = stdout.lock() {
             if let Err(e) = stdout.write_all(&bytes) {
-                log::error!(target: "fastmcp::transport", "Failed to send notification: {}", e);
+                log::error!(target: targets::TRANSPORT, "Failed to send notification: {}", e);
             }
             if let Err(e) = stdout.flush() {
-                log::error!(target: "fastmcp::transport", "Failed to flush notification: {}", e);
+                log::error!(target: targets::TRANSPORT, "Failed to flush notification: {}", e);
             }
         } else {
-            log::warn!(target: "fastmcp::server", "Failed to acquire stdout lock for notification");
+            log::warn!(target: targets::SERVER, "Failed to acquire stdout lock for notification");
         }
     })
 }

@@ -5,12 +5,13 @@ use std::sync::Arc;
 
 use asupersync::{Budget, Cx};
 use fastmcp_core::logging::{debug, targets, trace};
-use fastmcp_core::{McpContext, McpError, McpResult, block_on};
+use fastmcp_core::{McpContext, McpError, McpErrorCode, McpResult, block_on};
 use fastmcp_protocol::{
     CallToolParams, CallToolResult, Content, GetPromptParams, GetPromptResult, InitializeParams,
-    InitializeResult, JsonRpcRequest, ListPromptsParams, ListPromptsResult, ListResourcesParams,
+    InitializeResult, JsonRpcRequest, ListPromptsParams, ListPromptsResult,
+    ListResourceTemplatesParams, ListResourceTemplatesResult, ListResourcesParams,
     ListResourcesResult, ListToolsParams, ListToolsResult, PROTOCOL_VERSION, ProgressToken, Prompt,
-    ReadResourceParams, ReadResourceResult, Resource, Tool, validate,
+    ReadResourceParams, ReadResourceResult, Resource, ResourceTemplate, Tool, validate,
 };
 
 use crate::handler::create_context_with_progress;
@@ -32,6 +33,7 @@ pub struct Router {
     tools: HashMap<String, BoxedToolHandler>,
     resources: HashMap<String, BoxedResourceHandler>,
     prompts: HashMap<String, BoxedPromptHandler>,
+    resource_templates: HashMap<String, ResourceTemplate>,
 }
 
 impl Router {
@@ -42,6 +44,7 @@ impl Router {
             tools: HashMap::new(),
             resources: HashMap::new(),
             prompts: HashMap::new(),
+            resource_templates: HashMap::new(),
         }
     }
 
@@ -55,6 +58,12 @@ impl Router {
     pub fn add_resource<H: ResourceHandler + 'static>(&mut self, handler: H) {
         let def = handler.definition();
         self.resources.insert(def.uri.clone(), Box::new(handler));
+    }
+
+    /// Adds a resource template definition.
+    pub fn add_resource_template(&mut self, template: ResourceTemplate) {
+        self.resource_templates
+            .insert(template.uri_template.clone(), template);
     }
 
     /// Adds a prompt handler.
@@ -75,6 +84,12 @@ impl Router {
         self.resources.values().map(|h| h.definition()).collect()
     }
 
+    /// Returns all resource templates.
+    #[must_use]
+    pub fn resource_templates(&self) -> Vec<ResourceTemplate> {
+        self.resource_templates.values().cloned().collect()
+    }
+
     /// Returns all prompt definitions.
     #[must_use]
     pub fn prompts(&self) -> Vec<Prompt> {
@@ -93,6 +108,12 @@ impl Router {
         self.resources.len()
     }
 
+    /// Returns the number of registered resource templates.
+    #[must_use]
+    pub fn resource_templates_count(&self) -> usize {
+        self.resource_templates.len()
+    }
+
     /// Returns the number of registered prompts.
     #[must_use]
     pub fn prompts_count(&self) -> usize {
@@ -109,6 +130,12 @@ impl Router {
     #[must_use]
     pub fn get_resource(&self, uri: &str) -> Option<&BoxedResourceHandler> {
         self.resources.get(uri)
+    }
+
+    /// Gets a resource template by URI template.
+    #[must_use]
+    pub fn get_resource_template(&self, uri_template: &str) -> Option<&ResourceTemplate> {
+        self.resource_templates.get(uri_template)
     }
 
     /// Gets a prompt handler by name.
@@ -236,6 +263,11 @@ impl Router {
                 is_error: false,
             }),
             Err(e) => {
+                // If the request was cancelled, propagate the error as a JSON-RPC error.
+                if matches!(e.code, McpErrorCode::RequestCancelled) {
+                    return Err(e);
+                }
+
                 // Tool errors are returned as content with is_error=true
                 Ok(CallToolResult {
                     content: vec![Content::Text { text: e.message }],
@@ -254,6 +286,17 @@ impl Router {
         Ok(ListResourcesResult {
             resources: self.resources(),
             next_cursor: None,
+        })
+    }
+
+    /// Handles the resources/templates/list request.
+    pub fn handle_resource_templates_list(
+        &self,
+        _cx: &Cx,
+        _params: ListResourceTemplatesParams,
+    ) -> McpResult<ListResourceTemplatesResult> {
+        Ok(ListResourceTemplatesResult {
+            resource_templates: self.resource_templates(),
         })
     }
 

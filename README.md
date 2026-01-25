@@ -364,7 +364,7 @@ fastmcp_rust/
 │   ├── fastmcp/           # Facade crate (re-exports everything)
 │   ├── fastmcp-core/      # McpContext, errors, runtime helpers
 │   ├── fastmcp-protocol/  # MCP types, JSON-RPC messages
-│   ├── fastmcp-transport/ # Stdio transport (SSE/WS future)
+│   ├── fastmcp-transport/ # Transport implementations (stdio, SSE, WebSocket)
 │   ├── fastmcp-server/    # Server builder, router, handlers
 │   ├── fastmcp-client/    # Client implementation
 │   └── fastmcp-macros/    # #[tool], #[resource], #[prompt] macros
@@ -375,7 +375,7 @@ fastmcp_rust/
 | `fastmcp` | Convenience re-exports for simple `use fastmcp::prelude::*` |
 | `fastmcp-core` | `McpContext` wrapper, error types, `block_on` helper |
 | `fastmcp-protocol` | MCP message types, capabilities, JSON-RPC framing |
-| `fastmcp-transport` | Transport trait, stdio implementation |
+| `fastmcp-transport` | Transport trait, stdio/SSE/WebSocket implementations |
 | `fastmcp-server` | `Server`, `ServerBuilder`, routing, handler traits |
 | `fastmcp-client` | `Client` for calling MCP servers |
 | `fastmcp-macros` | Procedural macros for handler generation |
@@ -456,7 +456,7 @@ async fn critical_write(ctx: &McpContext, data: String) -> String {
 | Limitation | Details |
 |------------|---------|
 | **Nightly Required** | Uses Rust 2024 edition features |
-| **Stdio Only** | SSE and WebSocket transports planned but not implemented |
+| **Network Transports** | SSE and WebSocket transports are implemented at the transport layer, but HTTP/WS server integration is external |
 | **No Built-in TLS** | Transport encryption must be handled externally |
 | **Single-threaded Loop** | Main server loop is sequential (parallel handlers planned) |
 | **Sibling Dependency** | Requires asupersync at `../asupersync` |

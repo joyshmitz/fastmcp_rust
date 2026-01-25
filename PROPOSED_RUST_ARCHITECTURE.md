@@ -125,7 +125,8 @@ Key points:
 
 ## Current Implementation Notes
 
-- Stdio is the primary transport; SSE/WebSocket modules exist but are stubs.
+- Stdio is the primary transport; SSE/WebSocket transport modules are implemented,
+  with HTTP/upgrade integration handled externally.
 - Handlers are invoked via `block_on` in the router to keep API simple
   while the broader async runtime integration evolves.
 - Server stats collection is optional and can be disabled for performance.
@@ -142,7 +143,7 @@ Key points:
 
 - Rich logging subscriber integration
 - ConsoleConfig wiring into `ServerBuilder`
-- Full SSE/WebSocket transports
+- HTTP server adapters for SSE/WebSocket (routing, upgrade, auth)
 - Deterministic testing with `LabRuntime` in more modules
 
 ---

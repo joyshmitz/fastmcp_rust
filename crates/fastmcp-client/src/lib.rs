@@ -37,10 +37,10 @@ use fastmcp_core::{McpError, McpResult};
 use fastmcp_protocol::{
     CallToolParams, CallToolResult, ClientCapabilities, ClientInfo, Content, GetPromptParams,
     GetPromptResult, InitializeParams, InitializeResult, JsonRpcMessage, JsonRpcRequest,
-    ListPromptsParams, ListPromptsResult, ListResourcesParams, ListResourcesResult,
-    ListToolsParams, ListToolsResult, PROTOCOL_VERSION, ProgressParams, ProgressToken, Prompt,
-    PromptMessage, ReadResourceParams, ReadResourceResult, RequestMeta, Resource, ResourceContent,
-    ServerCapabilities, ServerInfo, Tool,
+    ListPromptsParams, ListPromptsResult, ListResourceTemplatesParams, ListResourceTemplatesResult,
+    ListResourcesParams, ListResourcesResult, ListToolsParams, ListToolsResult, PROTOCOL_VERSION,
+    ProgressParams, ProgressToken, Prompt, PromptMessage, ReadResourceParams, ReadResourceResult,
+    RequestMeta, Resource, ResourceContent, ResourceTemplate, ServerCapabilities, ServerInfo, Tool,
 };
 
 /// Callback for receiving progress notifications during tool execution.
@@ -213,7 +213,7 @@ impl Client {
         // Check for error response
         if let Some(error) = response.error {
             return Err(McpError::new(
-                fastmcp_core::McpErrorCode::Custom(error.code),
+                fastmcp_core::McpErrorCode::from(error.code),
                 error.message,
             ));
         }
@@ -318,7 +318,7 @@ impl Client {
                     _ => None,
                 })
                 .unwrap_or_else(|| "Tool execution failed".to_string());
-            return Err(McpError::internal_error(error_msg));
+            return Err(McpError::tool_error(error_msg));
         }
 
         Ok(result.content)
@@ -369,7 +369,7 @@ impl Client {
                     _ => None,
                 })
                 .unwrap_or_else(|| "Tool execution failed".to_string());
-            return Err(McpError::internal_error(error_msg));
+            return Err(McpError::tool_error(error_msg));
         }
 
         Ok(result.content)
@@ -401,7 +401,7 @@ impl Client {
         // Check for error response
         if let Some(error) = response.error {
             return Err(McpError::new(
-                fastmcp_core::McpErrorCode::Custom(error.code),
+                fastmcp_core::McpErrorCode::from(error.code),
                 error.message,
             ));
         }
@@ -460,6 +460,18 @@ impl Client {
         let params = ListResourcesParams { cursor: None };
         let result: ListResourcesResult = self.send_request("resources/list", params)?;
         Ok(result.resources)
+    }
+
+    /// Lists available resource templates.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails.
+    pub fn list_resource_templates(&mut self) -> McpResult<Vec<ResourceTemplate>> {
+        let params = ListResourceTemplatesParams { cursor: None };
+        let result: ListResourceTemplatesResult =
+            self.send_request("resources/templates/list", params)?;
+        Ok(result.resource_templates)
     }
 
     /// Reads a resource by URI.

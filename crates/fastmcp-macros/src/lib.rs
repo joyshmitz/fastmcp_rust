@@ -275,9 +275,49 @@ fn type_to_json_schema(ty: &Type) -> TokenStream2 {
             }
             quote! { serde_json::json!({ "type": "array" }) }
         }
-        _ => {
-            // Default to object for complex types
+        "HashSet" | "BTreeSet" => {
+            // For Set<T>, create array schema with uniqueItems
+            if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                    let inner_schema = type_to_json_schema(inner_ty);
+                    return quote! {
+                        serde_json::json!({
+                            "type": "array",
+                            "items": #inner_schema,
+                            "uniqueItems": true
+                        })
+                    };
+                }
+            }
+            quote! { serde_json::json!({ "type": "array", "uniqueItems": true }) }
+        }
+        "HashMap" | "BTreeMap" => {
+            // For Map<K, V>, create object schema with additionalProperties
+            if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                // Check if key is String-like (implied for JSON object keys)
+                // We mainly care about the value type (second arg)
+                if args.args.len() >= 2 {
+                    if let Some(syn::GenericArgument::Type(value_ty)) = args.args.iter().nth(1) {
+                        let value_schema = type_to_json_schema(value_ty);
+                        return quote! {
+                            serde_json::json!({
+                                "type": "object",
+                                "additionalProperties": #value_schema
+                            })
+                        };
+                    }
+                }
+            }
             quote! { serde_json::json!({ "type": "object" }) }
+        }
+        "serde_json::Value" | "Value" => {
+            // Any JSON value
+            quote! { serde_json::json!({}) }
+        }
+        _ => {
+            // For other types, assume they implement a json_schema() method
+            // (e.g. via #[derive(JsonSchema)] or manual implementation)
+            quote! { <#ty>::json_schema() }
         }
     }
 }

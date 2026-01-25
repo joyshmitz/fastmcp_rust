@@ -3,7 +3,8 @@
 use fastmcp_console::config::{BannerStyle, ConsoleConfig, TrafficVerbosity};
 use fastmcp_console::stats::ServerStats;
 use fastmcp_protocol::{
-    PromptsCapability, ResourcesCapability, ServerCapabilities, ServerInfo, ToolsCapability,
+    PromptsCapability, ResourceTemplate, ResourcesCapability, ServerCapabilities, ServerInfo,
+    ToolsCapability,
 };
 use log::{Level, LevelFilter};
 
@@ -87,6 +88,14 @@ impl ServerBuilder {
     #[must_use]
     pub fn resource<H: ResourceHandler + 'static>(mut self, handler: H) -> Self {
         self.router.add_resource(handler);
+        self.capabilities.resources = Some(ResourcesCapability::default());
+        self
+    }
+
+    /// Registers a resource template.
+    #[must_use]
+    pub fn resource_template(mut self, template: ResourceTemplate) -> Self {
+        self.router.add_resource_template(template);
         self.capabilities.resources = Some(ResourcesCapability::default());
         self
     }

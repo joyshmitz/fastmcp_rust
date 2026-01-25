@@ -42,7 +42,7 @@ use std::io::{BufReader, Read, Write};
 
 use asupersync::Cx;
 
-use crate::{Codec, TransportError};
+use crate::{Codec, Transport, TransportError};
 use fastmcp_protocol::{JsonRpcMessage, JsonRpcRequest, JsonRpcResponse};
 
 /// WebSocket frame types.
@@ -446,6 +446,20 @@ impl<R: Read, W: Write> WsTransport<R, W> {
     }
 }
 
+impl<R: Read, W: Write> Transport for WsTransport<R, W> {
+    fn send(&mut self, cx: &Cx, message: &JsonRpcMessage) -> Result<(), TransportError> {
+        WsTransport::send(self, cx, message)
+    }
+
+    fn recv(&mut self, cx: &Cx) -> Result<JsonRpcMessage, TransportError> {
+        WsTransport::recv(self, cx)
+    }
+
+    fn close(&mut self) -> Result<(), TransportError> {
+        WsTransport::close(self)
+    }
+}
+
 /// Client-side WebSocket mask generation.
 ///
 /// Clients must mask frames per RFC 6455. This struct provides
@@ -645,6 +659,20 @@ impl<R: Read, W: Write> WsClientTransport<R, W> {
         let frame = WsFrame::close();
         self.writer.write_frame(&frame)?;
         Ok(())
+    }
+}
+
+impl<R: Read, W: Write> Transport for WsClientTransport<R, W> {
+    fn send(&mut self, cx: &Cx, message: &JsonRpcMessage) -> Result<(), TransportError> {
+        WsClientTransport::send(self, cx, message)
+    }
+
+    fn recv(&mut self, cx: &Cx) -> Result<JsonRpcMessage, TransportError> {
+        WsClientTransport::recv(self, cx)
+    }
+
+    fn close(&mut self) -> Result<(), TransportError> {
+        WsClientTransport::close(self)
     }
 }
 
