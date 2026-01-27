@@ -441,6 +441,7 @@ impl ServerBuilder {
             middleware: Arc::new(self.middleware),
             active_requests: Mutex::new(HashMap::new()),
             task_manager: self.task_manager,
+            pending_requests: std::sync::Arc::new(crate::bidirectional::PendingRequests::new()),
         }
     }
 }

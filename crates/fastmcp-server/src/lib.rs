@@ -27,13 +27,17 @@
 #![allow(dead_code)]
 
 mod auth;
+pub mod bidirectional;
 mod builder;
+pub mod caching;
 mod handler;
 mod middleware;
 mod proxy;
+pub mod rate_limiting;
 mod router;
 mod session;
 mod tasks;
+pub mod transform;
 
 #[cfg(test)]
 mod tests;
@@ -56,6 +60,12 @@ pub use proxy::{ProxyBackend, ProxyCatalog, ProxyClient};
 pub use router::{NotificationSender, Router};
 pub use session::Session;
 pub use tasks::{SharedTaskManager, TaskManager};
+
+// Re-export bidirectional communication types
+pub use bidirectional::{
+    PendingRequests, RequestSender, TransportElicitationSender, TransportRootsProvider,
+    TransportSamplingSender,
+};
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -223,6 +233,8 @@ pub struct Server {
     active_requests: Mutex<HashMap<RequestId, ActiveRequest>>,
     /// Optional task manager for background tasks (Docket/SEP-1686).
     task_manager: Option<SharedTaskManager>,
+    /// Pending server-to-client requests (for bidirectional communication).
+    pending_requests: Arc<bidirectional::PendingRequests>,
 }
 
 impl Server {
@@ -628,8 +640,13 @@ impl Server {
                     }
                     self.handle_request(cx, &mut session, request, &notification_sender)
                 }
-                JsonRpcMessage::Response(_) => {
-                    // Servers don't expect responses
+                JsonRpcMessage::Response(response) => {
+                    // Route response to pending server-initiated request (bidirectional)
+                    if self.pending_requests.route_response(&response) {
+                        debug!(target: targets::SERVER, "Routed response to pending request");
+                    } else {
+                        debug!(target: targets::SERVER, "Received unexpected response: {:?}", response.id);
+                    }
                     continue;
                 }
             };

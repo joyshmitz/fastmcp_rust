@@ -163,12 +163,30 @@ The Rust port covers **core MCP protocol functionality well**, but lacks several
 |------------|--------|------|-------|
 | `sampling/createMessage` | ✅ | ✅ | Protocol types + McpContext::sample() |
 
-### Missing Protocol Methods
+### Protocol Methods In Progress
 
 | MCP Method | Python | Rust | Priority | Notes |
 |------------|--------|------|----------|-------|
-| **Elicitation** | ✅ | ❌ | **High** | User input requests (18 KB Python module) |
-| **Roots** | ✅ | ❌ | Medium | Filesystem roots |
+| **Elicitation** | ✅ | 🟡 | **High** | Protocol types + McpContext::elicit_*() implemented (bd-j6n), server wiring blocked on bd-2wm |
+| **Roots** | ✅ | 🟡 | Medium | Protocol types implemented (bd-10g), server wiring blocked on bd-2wm |
+
+### Architecture: Server-to-Client Requests
+
+**Status (bd-2wm):** ✅ **RESOLVED** - Bidirectional communication infrastructure implemented!
+
+**Implemented Solution:**
+1. ✅ `PendingRequests` - Tracks server-to-client requests with response routing
+2. ✅ `RequestSender` - Sends requests through transport with response awaiting
+3. ✅ `TransportSamplingSender` - Implements `SamplingSender` trait for `sampling/createMessage`
+4. ✅ `TransportElicitationSender` - Implements `ElicitationSender` trait for `elicitation/elicit`
+5. ✅ `TransportRootsProvider` - Provides `roots/list` requests
+6. ✅ Main loop routes responses to pending requests (no longer ignores them)
+7. ✅ `Server` struct has `pending_requests` field for tracking
+
+**Remaining Wiring (bd-21v, bd-10g, bd-j6n):**
+Pass `RequestSender` through handler execution path to attach senders to `McpContext`.
+
+**Unblocked Beads:** bd-21v (sampling wiring), bd-10g (roots wiring), bd-j6n (elicitation wiring)
 
 ---
 

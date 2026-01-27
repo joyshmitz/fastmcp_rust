@@ -76,6 +76,9 @@ pub use fastmcp_protocol::{
 // Re-export transport types
 pub use fastmcp_transport::{Codec, StdioTransport, Transport, TransportError};
 
+// Re-export transport modules
+pub use fastmcp_transport::{event_store, memory};
+
 // Re-export server types
 #[cfg(feature = "jwt")]
 pub use fastmcp_server::JwtTokenVerifier;
@@ -84,6 +87,9 @@ pub use fastmcp_server::{
     ProxyClient, ResourceHandler, Router, Server, ServerBuilder, Session, SharedTaskManager,
     StaticTokenVerifier, TaskManager, TokenAuthProvider, TokenVerifier, ToolHandler,
 };
+
+// Re-export server middleware modules
+pub use fastmcp_server::{caching, rate_limiting, transform};
 
 // Re-export client types
 pub use fastmcp_client::{Client, ClientBuilder, ClientSession};
