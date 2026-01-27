@@ -708,8 +708,29 @@ enum UriSegment {
 }
 
 impl UriTemplate {
+    /// Creates a new URI template from a pattern.
+    ///
+    /// If the pattern is invalid, logs a warning and returns a template
+    /// that will never match any URI (fail-safe behavior).
     fn new(pattern: &str) -> Self {
-        Self::parse(pattern).expect("invalid URI template")
+        Self::try_new(pattern).unwrap_or_else(|err| {
+            fastmcp_core::logging::warn!(
+                target: targets::HANDLER,
+                "Invalid URI template '{}': {:?}, using non-matching fallback",
+                pattern,
+                err
+            );
+            // Return a template with no segments that can never match
+            Self {
+                pattern: pattern.to_string(),
+                segments: vec![UriSegment::Literal("\0INVALID\0".to_string())],
+            }
+        })
+    }
+
+    /// Attempts to create a URI template, returning an error if invalid.
+    fn try_new(pattern: &str) -> Result<Self, UriTemplateError> {
+        Self::parse(pattern)
     }
 
     fn parse(pattern: &str) -> Result<Self, UriTemplateError> {
