@@ -24,6 +24,7 @@
 #![allow(dead_code)]
 
 mod builder;
+pub mod mcp_config;
 mod session;
 
 pub use builder::ClientBuilder;
