@@ -218,6 +218,213 @@ impl SamplingSender for NoOpSamplingSender {
     }
 }
 
+// ============================================================================
+// Elicitation Sender
+// ============================================================================
+
+/// Trait for sending elicitation requests to the client.
+///
+/// Elicitation allows the server to request user input from the client.
+/// This enables interactive workflows where tools can prompt users for
+/// additional information.
+pub trait ElicitationSender: Send + Sync {
+    /// Sends an elicitation/create request to the client.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - The elicitation request parameters
+    ///
+    /// # Returns
+    ///
+    /// The elicitation response from the client, or an error if elicitation
+    /// failed or the client doesn't support elicitation.
+    fn elicit(
+        &self,
+        request: ElicitationRequest,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = crate::McpResult<ElicitationResponse>> + Send + '_>,
+    >;
+}
+
+/// Parameters for an elicitation request.
+#[derive(Debug, Clone)]
+pub struct ElicitationRequest {
+    /// Mode of elicitation (form or URL).
+    pub mode: ElicitationMode,
+    /// Message to present to the user.
+    pub message: String,
+    /// For form mode: JSON Schema for the expected response.
+    pub schema: Option<serde_json::Value>,
+    /// For URL mode: URL to navigate to.
+    pub url: Option<String>,
+    /// For URL mode: Unique elicitation ID.
+    pub elicitation_id: Option<String>,
+}
+
+impl ElicitationRequest {
+    /// Creates a form mode elicitation request.
+    #[must_use]
+    pub fn form(message: impl Into<String>, schema: serde_json::Value) -> Self {
+        Self {
+            mode: ElicitationMode::Form,
+            message: message.into(),
+            schema: Some(schema),
+            url: None,
+            elicitation_id: None,
+        }
+    }
+
+    /// Creates a URL mode elicitation request.
+    #[must_use]
+    pub fn url(
+        message: impl Into<String>,
+        url: impl Into<String>,
+        elicitation_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            mode: ElicitationMode::Url,
+            message: message.into(),
+            schema: None,
+            url: Some(url.into()),
+            elicitation_id: Some(elicitation_id.into()),
+        }
+    }
+}
+
+/// Mode of elicitation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElicitationMode {
+    /// Form mode - collect user input via in-band form.
+    Form,
+    /// URL mode - redirect user to external URL.
+    Url,
+}
+
+/// Response from an elicitation request.
+#[derive(Debug, Clone)]
+pub struct ElicitationResponse {
+    /// User's action (accept, decline, cancel).
+    pub action: ElicitationAction,
+    /// Form data (only present when action is Accept and mode is Form).
+    pub content: Option<std::collections::HashMap<String, serde_json::Value>>,
+}
+
+impl ElicitationResponse {
+    /// Creates an accepted response with form data.
+    #[must_use]
+    pub fn accept(content: std::collections::HashMap<String, serde_json::Value>) -> Self {
+        Self {
+            action: ElicitationAction::Accept,
+            content: Some(content),
+        }
+    }
+
+    /// Creates an accepted response for URL mode (no content).
+    #[must_use]
+    pub fn accept_url() -> Self {
+        Self {
+            action: ElicitationAction::Accept,
+            content: None,
+        }
+    }
+
+    /// Creates a declined response.
+    #[must_use]
+    pub fn decline() -> Self {
+        Self {
+            action: ElicitationAction::Decline,
+            content: None,
+        }
+    }
+
+    /// Creates a cancelled response.
+    #[must_use]
+    pub fn cancel() -> Self {
+        Self {
+            action: ElicitationAction::Cancel,
+            content: None,
+        }
+    }
+
+    /// Returns true if the user accepted.
+    #[must_use]
+    pub fn is_accepted(&self) -> bool {
+        matches!(self.action, ElicitationAction::Accept)
+    }
+
+    /// Returns true if the user declined.
+    #[must_use]
+    pub fn is_declined(&self) -> bool {
+        matches!(self.action, ElicitationAction::Decline)
+    }
+
+    /// Returns true if the user cancelled.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self.action, ElicitationAction::Cancel)
+    }
+
+    /// Gets a string value from the form content.
+    #[must_use]
+    pub fn get_string(&self, key: &str) -> Option<&str> {
+        self.content
+            .as_ref()?
+            .get(key)?
+            .as_str()
+    }
+
+    /// Gets a boolean value from the form content.
+    #[must_use]
+    pub fn get_bool(&self, key: &str) -> Option<bool> {
+        self.content
+            .as_ref()?
+            .get(key)?
+            .as_bool()
+    }
+
+    /// Gets an integer value from the form content.
+    #[must_use]
+    pub fn get_int(&self, key: &str) -> Option<i64> {
+        self.content
+            .as_ref()?
+            .get(key)?
+            .as_i64()
+    }
+}
+
+/// Action taken by the user in response to elicitation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElicitationAction {
+    /// User accepted/submitted the form.
+    Accept,
+    /// User explicitly declined.
+    Decline,
+    /// User dismissed without choice.
+    Cancel,
+}
+
+/// A no-op elicitation sender that always returns an error.
+///
+/// Used when the client doesn't support elicitation.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoOpElicitationSender;
+
+impl ElicitationSender for NoOpElicitationSender {
+    fn elicit(
+        &self,
+        _request: ElicitationRequest,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = crate::McpResult<ElicitationResponse>> + Send + '_>,
+    > {
+        Box::pin(async {
+            Err(crate::McpError::new(
+                crate::McpErrorCode::InvalidRequest,
+                "Elicitation not supported: client does not have elicitation capability",
+            ))
+        })
+    }
+}
+
 /// A no-op notification sender used when progress reporting is disabled.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoOpNotificationSender;
@@ -279,6 +486,7 @@ impl std::fmt::Debug for ProgressReporter {
 /// - Budget/deadline awareness for timeout enforcement
 /// - Region-scoped spawning for background work
 /// - Sampling capability for LLM completions (if client supports it)
+/// - Elicitation capability for user input requests (if client supports it)
 ///
 /// # Example
 ///
@@ -292,6 +500,9 @@ impl std::fmt::Debug for ProgressReporter {
 ///
 ///     // Request an LLM completion (if available)
 ///     let response = ctx.sample("Write a haiku about Rust", 100).await?;
+///
+///     // Request user input (if available)
+///     let input = ctx.elicit_form("Enter your name", schema).await?;
 ///
 ///     // Return result
 ///     Ok(json!({"result": response.text}))
@@ -309,6 +520,8 @@ pub struct McpContext {
     state: Option<SessionState>,
     /// Optional sampling sender for LLM completions.
     sampling_sender: Option<Arc<dyn SamplingSender>>,
+    /// Optional elicitation sender for user input requests.
+    elicitation_sender: Option<Arc<dyn ElicitationSender>>,
 }
 
 impl std::fmt::Debug for McpContext {
@@ -319,6 +532,7 @@ impl std::fmt::Debug for McpContext {
             .field("progress_reporter", &self.progress_reporter)
             .field("state", &self.state.is_some())
             .field("sampling_sender", &self.sampling_sender.is_some())
+            .field("elicitation_sender", &self.elicitation_sender.is_some())
             .finish()
     }
 }
@@ -336,6 +550,7 @@ impl McpContext {
             progress_reporter: None,
             state: None,
             sampling_sender: None,
+            elicitation_sender: None,
         }
     }
 
@@ -350,6 +565,7 @@ impl McpContext {
             progress_reporter: None,
             state: Some(state),
             sampling_sender: None,
+            elicitation_sender: None,
         }
     }
 
@@ -365,6 +581,7 @@ impl McpContext {
             progress_reporter: Some(reporter),
             state: None,
             sampling_sender: None,
+            elicitation_sender: None,
         }
     }
 
@@ -382,6 +599,7 @@ impl McpContext {
             progress_reporter: Some(reporter),
             state: Some(state),
             sampling_sender: None,
+            elicitation_sender: None,
         }
     }
 
@@ -392,6 +610,16 @@ impl McpContext {
     #[must_use]
     pub fn with_sampling(mut self, sender: Arc<dyn SamplingSender>) -> Self {
         self.sampling_sender = Some(sender);
+        self
+    }
+
+    /// Sets the elicitation sender for this context.
+    ///
+    /// This enables the `elicit()` methods to request user input from
+    /// the client.
+    #[must_use]
+    pub fn with_elicitation(mut self, sender: Arc<dyn ElicitationSender>) -> Self {
+        self.elicitation_sender = Some(sender);
         self
     }
 
@@ -747,6 +975,133 @@ impl McpContext {
         })?;
 
         sender.create_message(request).await
+    }
+
+    // ========================================================================
+    // Elicitation (User Input Requests)
+    // ========================================================================
+
+    /// Returns whether elicitation is available in this context.
+    ///
+    /// Elicitation is available when the client has advertised elicitation
+    /// capability and an elicitation sender has been configured.
+    #[must_use]
+    pub fn can_elicit(&self) -> bool {
+        self.elicitation_sender.is_some()
+    }
+
+    /// Requests user input via a form.
+    ///
+    /// This presents a form to the user with fields defined by the JSON schema.
+    /// The user can accept (submit the form), decline, or cancel.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - Message to display explaining what input is needed
+    /// * `schema` - JSON Schema defining the form fields
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The client doesn't support elicitation
+    /// - The elicitation request fails
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// async fn my_tool(ctx: &McpContext) -> McpResult<String> {
+    ///     let schema = serde_json::json!({
+    ///         "type": "object",
+    ///         "properties": {
+    ///             "name": {"type": "string"},
+    ///             "age": {"type": "integer"}
+    ///         },
+    ///         "required": ["name"]
+    ///     });
+    ///     let response = ctx.elicit_form("Please enter your details", schema).await?;
+    ///     if response.is_accepted() {
+    ///         let name = response.get_string("name").unwrap_or("Unknown");
+    ///         Ok(format!("Hello, {name}!"))
+    ///     } else {
+    ///         Ok("User declined input".to_string())
+    ///     }
+    /// }
+    /// ```
+    pub async fn elicit_form(
+        &self,
+        message: impl Into<String>,
+        schema: serde_json::Value,
+    ) -> crate::McpResult<ElicitationResponse> {
+        let request = ElicitationRequest::form(message, schema);
+        self.elicit_with_request(request).await
+    }
+
+    /// Requests user interaction via an external URL.
+    ///
+    /// This directs the user to an external URL for sensitive operations like
+    /// OAuth flows, payment processing, or credential collection.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - Message to display explaining why the URL visit is needed
+    /// * `url` - The URL the user should navigate to
+    /// * `elicitation_id` - Unique ID for tracking this elicitation
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The client doesn't support elicitation
+    /// - The elicitation request fails
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// async fn my_tool(ctx: &McpContext) -> McpResult<String> {
+    ///     let response = ctx.elicit_url(
+    ///         "Please authenticate with your GitHub account",
+    ///         "https://github.com/login/oauth/authorize?...",
+    ///         "github-auth-12345",
+    ///     ).await?;
+    ///     if response.is_accepted() {
+    ///         Ok("Authentication successful".to_string())
+    ///     } else {
+    ///         Ok("Authentication cancelled".to_string())
+    ///     }
+    /// }
+    /// ```
+    pub async fn elicit_url(
+        &self,
+        message: impl Into<String>,
+        url: impl Into<String>,
+        elicitation_id: impl Into<String>,
+    ) -> crate::McpResult<ElicitationResponse> {
+        let request = ElicitationRequest::url(message, url, elicitation_id);
+        self.elicit_with_request(request).await
+    }
+
+    /// Requests user input with full control over the request.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - The full elicitation request parameters
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The client doesn't support elicitation
+    /// - The elicitation request fails
+    pub async fn elicit_with_request(
+        &self,
+        request: ElicitationRequest,
+    ) -> crate::McpResult<ElicitationResponse> {
+        let sender = self.elicitation_sender.as_ref().ok_or_else(|| {
+            crate::McpError::new(
+                crate::McpErrorCode::InvalidRequest,
+                "Elicitation not available: client does not support elicitation capability",
+            )
+        })?;
+
+        sender.elicit(request).await
     }
 
     // ========================================================================

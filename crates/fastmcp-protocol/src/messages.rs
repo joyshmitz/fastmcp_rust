@@ -620,6 +620,388 @@ impl CreateMessageResult {
     }
 }
 
+// ============================================================================
+// Roots (Client-to-Server filesystem roots)
+// ============================================================================
+
+use crate::types::Root;
+
+/// roots/list request params.
+///
+/// Sent from server to client to request the list of available filesystem roots.
+/// This request has no parameters.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListRootsParams {}
+
+/// roots/list response result.
+///
+/// Returned by the client with the list of available filesystem roots.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListRootsResult {
+    /// The list of available roots.
+    pub roots: Vec<Root>,
+}
+
+impl ListRootsResult {
+    /// Creates a new empty result.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self { roots: Vec::new() }
+    }
+
+    /// Creates a result with the given roots.
+    #[must_use]
+    pub fn new(roots: Vec<Root>) -> Self {
+        Self { roots }
+    }
+}
+
+/// Notification params for roots/list_changed.
+///
+/// Sent by the client when the list of roots changes.
+/// This notification has no parameters.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RootsListChangedNotificationParams {}
+
+// ============================================================================
+// Elicitation (Server-to-Client user input requests)
+// ============================================================================
+
+/// JSON Schema for elicitation requests.
+///
+/// Must be an object schema with flat properties (no nesting).
+/// Only primitive types (string, number, integer, boolean) are allowed.
+pub type ElicitRequestedSchema = serde_json::Value;
+
+/// Parameters for form mode elicitation requests.
+///
+/// Form mode collects non-sensitive information from the user via an in-band form
+/// rendered by the client.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElicitRequestFormParams {
+    /// The elicitation mode (always "form" for this type).
+    pub mode: ElicitMode,
+    /// The message to present to the user describing what information is being requested.
+    pub message: String,
+    /// A restricted subset of JSON Schema defining the structure of expected response.
+    /// Only top-level properties are allowed, without nesting.
+    #[serde(rename = "requestedSchema")]
+    pub requested_schema: ElicitRequestedSchema,
+}
+
+impl ElicitRequestFormParams {
+    /// Creates a new form elicitation request.
+    #[must_use]
+    pub fn new(message: impl Into<String>, schema: serde_json::Value) -> Self {
+        Self {
+            mode: ElicitMode::Form,
+            message: message.into(),
+            requested_schema: schema,
+        }
+    }
+}
+
+/// Parameters for URL mode elicitation requests.
+///
+/// URL mode directs users to external URLs for sensitive out-of-band interactions
+/// like OAuth flows, credential collection, or payment processing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElicitRequestUrlParams {
+    /// The elicitation mode (always "url" for this type).
+    pub mode: ElicitMode,
+    /// The message to present to the user explaining why the interaction is needed.
+    pub message: String,
+    /// The URL that the user should navigate to.
+    pub url: String,
+    /// The ID of the elicitation, which must be unique within the context of the server.
+    /// The client MUST treat this ID as an opaque value.
+    #[serde(rename = "elicitationId")]
+    pub elicitation_id: String,
+}
+
+impl ElicitRequestUrlParams {
+    /// Creates a new URL elicitation request.
+    #[must_use]
+    pub fn new(
+        message: impl Into<String>,
+        url: impl Into<String>,
+        elicitation_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            mode: ElicitMode::Url,
+            message: message.into(),
+            url: url.into(),
+            elicitation_id: elicitation_id.into(),
+        }
+    }
+}
+
+/// Elicitation mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ElicitMode {
+    /// Form mode - collect user input via in-band form.
+    Form,
+    /// URL mode - redirect user to external URL.
+    Url,
+}
+
+/// Parameters for elicitation requests (either form or URL mode).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ElicitRequestParams {
+    /// Form mode elicitation.
+    Form(ElicitRequestFormParams),
+    /// URL mode elicitation.
+    Url(ElicitRequestUrlParams),
+}
+
+impl ElicitRequestParams {
+    /// Creates a form mode elicitation request.
+    #[must_use]
+    pub fn form(message: impl Into<String>, schema: serde_json::Value) -> Self {
+        Self::Form(ElicitRequestFormParams::new(message, schema))
+    }
+
+    /// Creates a URL mode elicitation request.
+    #[must_use]
+    pub fn url(
+        message: impl Into<String>,
+        url: impl Into<String>,
+        elicitation_id: impl Into<String>,
+    ) -> Self {
+        Self::Url(ElicitRequestUrlParams::new(message, url, elicitation_id))
+    }
+
+    /// Returns the mode of this elicitation request.
+    #[must_use]
+    pub fn mode(&self) -> ElicitMode {
+        match self {
+            Self::Form(_) => ElicitMode::Form,
+            Self::Url(_) => ElicitMode::Url,
+        }
+    }
+
+    /// Returns the message for this elicitation request.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Form(f) => &f.message,
+            Self::Url(u) => &u.message,
+        }
+    }
+}
+
+/// User action in response to an elicitation request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ElicitAction {
+    /// User submitted the form/confirmed the action (or consented to URL navigation).
+    Accept,
+    /// User explicitly declined the action.
+    Decline,
+    /// User dismissed without making an explicit choice.
+    Cancel,
+}
+
+/// Content type for elicitation responses.
+///
+/// Values can be strings, integers, floats, booleans, arrays of strings, or null.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ElicitContentValue {
+    /// Null value.
+    Null,
+    /// Boolean value.
+    Bool(bool),
+    /// Integer value.
+    Int(i64),
+    /// Float value.
+    Float(f64),
+    /// String value.
+    String(String),
+    /// Array of strings (for multi-select).
+    StringArray(Vec<String>),
+}
+
+impl From<bool> for ElicitContentValue {
+    fn from(v: bool) -> Self {
+        Self::Bool(v)
+    }
+}
+
+impl From<i64> for ElicitContentValue {
+    fn from(v: i64) -> Self {
+        Self::Int(v)
+    }
+}
+
+impl From<f64> for ElicitContentValue {
+    fn from(v: f64) -> Self {
+        Self::Float(v)
+    }
+}
+
+impl From<String> for ElicitContentValue {
+    fn from(v: String) -> Self {
+        Self::String(v)
+    }
+}
+
+impl From<&str> for ElicitContentValue {
+    fn from(v: &str) -> Self {
+        Self::String(v.to_owned())
+    }
+}
+
+impl From<Vec<String>> for ElicitContentValue {
+    fn from(v: Vec<String>) -> Self {
+        Self::StringArray(v)
+    }
+}
+
+impl<T: Into<ElicitContentValue>> From<Option<T>> for ElicitContentValue {
+    fn from(v: Option<T>) -> Self {
+        match v {
+            Some(v) => v.into(),
+            None => Self::Null,
+        }
+    }
+}
+
+/// elicitation/create response result.
+///
+/// The client's response to an elicitation request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElicitResult {
+    /// The user action in response to the elicitation.
+    pub action: ElicitAction,
+    /// The submitted form data, only present when action is "accept" in form mode.
+    /// Contains values matching the requested schema.
+    /// For URL mode, this field is omitted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<std::collections::HashMap<String, ElicitContentValue>>,
+}
+
+impl ElicitResult {
+    /// Creates an accept result with form data.
+    #[must_use]
+    pub fn accept(content: std::collections::HashMap<String, ElicitContentValue>) -> Self {
+        Self {
+            action: ElicitAction::Accept,
+            content: Some(content),
+        }
+    }
+
+    /// Creates an accept result for URL mode (no content).
+    #[must_use]
+    pub fn accept_url() -> Self {
+        Self {
+            action: ElicitAction::Accept,
+            content: None,
+        }
+    }
+
+    /// Creates a decline result.
+    #[must_use]
+    pub fn decline() -> Self {
+        Self {
+            action: ElicitAction::Decline,
+            content: None,
+        }
+    }
+
+    /// Creates a cancel result.
+    #[must_use]
+    pub fn cancel() -> Self {
+        Self {
+            action: ElicitAction::Cancel,
+            content: None,
+        }
+    }
+
+    /// Returns true if the user accepted the elicitation.
+    #[must_use]
+    pub fn is_accepted(&self) -> bool {
+        matches!(self.action, ElicitAction::Accept)
+    }
+
+    /// Returns true if the user declined the elicitation.
+    #[must_use]
+    pub fn is_declined(&self) -> bool {
+        matches!(self.action, ElicitAction::Decline)
+    }
+
+    /// Returns true if the user cancelled the elicitation.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self.action, ElicitAction::Cancel)
+    }
+
+    /// Gets a string value from the content.
+    #[must_use]
+    pub fn get_string(&self, key: &str) -> Option<&str> {
+        self.content.as_ref().and_then(|c| {
+            c.get(key).and_then(|v| match v {
+                ElicitContentValue::String(s) => Some(s.as_str()),
+                _ => None,
+            })
+        })
+    }
+
+    /// Gets a boolean value from the content.
+    #[must_use]
+    pub fn get_bool(&self, key: &str) -> Option<bool> {
+        self.content.as_ref().and_then(|c| {
+            c.get(key).and_then(|v| match v {
+                ElicitContentValue::Bool(b) => Some(*b),
+                _ => None,
+            })
+        })
+    }
+
+    /// Gets an integer value from the content.
+    #[must_use]
+    pub fn get_int(&self, key: &str) -> Option<i64> {
+        self.content.as_ref().and_then(|c| {
+            c.get(key).and_then(|v| match v {
+                ElicitContentValue::Int(i) => Some(*i),
+                _ => None,
+            })
+        })
+    }
+}
+
+/// Elicitation complete notification params.
+///
+/// Sent from server to client when a URL mode elicitation has been completed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElicitCompleteNotificationParams {
+    /// The unique identifier of the elicitation that was completed.
+    #[serde(rename = "elicitationId")]
+    pub elicitation_id: String,
+}
+
+impl ElicitCompleteNotificationParams {
+    /// Creates a new elicitation complete notification.
+    #[must_use]
+    pub fn new(elicitation_id: impl Into<String>) -> Self {
+        Self {
+            elicitation_id: elicitation_id.into(),
+        }
+    }
+}
+
+/// Error data for URL elicitation required errors.
+///
+/// Servers return this when a request cannot be processed until one or more
+/// URL mode elicitations are completed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElicitationRequiredErrorData {
+    /// List of URL mode elicitations that must be completed.
+    pub elicitations: Vec<ElicitRequestUrlParams>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -877,5 +1259,128 @@ mod tests {
             stop_reason: StopReason::EndTurn,
         };
         assert_eq!(result.text_content(), None);
+    }
+
+    // ========================================================================
+    // Elicitation Tests
+    // ========================================================================
+
+    #[test]
+    fn elicit_form_params_serialization() {
+        let params = ElicitRequestFormParams::new(
+            "Please enter your name",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"}
+                },
+                "required": ["name"]
+            }),
+        );
+        let value = serde_json::to_value(&params).expect("serialize");
+        assert_eq!(value["mode"], "form");
+        assert_eq!(value["message"], "Please enter your name");
+        assert!(value["requestedSchema"]["properties"]["name"].is_object());
+    }
+
+    #[test]
+    fn elicit_url_params_serialization() {
+        let params = ElicitRequestUrlParams::new(
+            "Please authenticate",
+            "https://auth.example.com/oauth",
+            "elicit-12345",
+        );
+        let value = serde_json::to_value(&params).expect("serialize");
+        assert_eq!(value["mode"], "url");
+        assert_eq!(value["message"], "Please authenticate");
+        assert_eq!(value["url"], "https://auth.example.com/oauth");
+        assert_eq!(value["elicitationId"], "elicit-12345");
+    }
+
+    #[test]
+    fn elicit_request_params_untagged() {
+        let form = ElicitRequestParams::form(
+            "Enter name",
+            serde_json::json!({"type": "object", "properties": {}}),
+        );
+        assert_eq!(form.mode(), ElicitMode::Form);
+        assert_eq!(form.message(), "Enter name");
+
+        let url = ElicitRequestParams::url("Auth required", "https://example.com", "id-1");
+        assert_eq!(url.mode(), ElicitMode::Url);
+        assert_eq!(url.message(), "Auth required");
+    }
+
+    #[test]
+    fn elicit_result_accept_with_content() {
+        let mut content = std::collections::HashMap::new();
+        content.insert("name".to_string(), ElicitContentValue::String("Alice".to_string()));
+        content.insert("age".to_string(), ElicitContentValue::Int(30));
+        content.insert("active".to_string(), ElicitContentValue::Bool(true));
+
+        let result = ElicitResult::accept(content);
+        assert!(result.is_accepted());
+        assert!(!result.is_declined());
+        assert!(!result.is_cancelled());
+        assert_eq!(result.get_string("name"), Some("Alice"));
+        assert_eq!(result.get_int("age"), Some(30));
+        assert_eq!(result.get_bool("active"), Some(true));
+    }
+
+    #[test]
+    fn elicit_result_serialization() {
+        let result = ElicitResult::decline();
+        let value = serde_json::to_value(&result).expect("serialize");
+        assert_eq!(value["action"], "decline");
+        assert!(value.get("content").is_none());
+
+        let result = ElicitResult::cancel();
+        let value = serde_json::to_value(&result).expect("serialize");
+        assert_eq!(value["action"], "cancel");
+    }
+
+    #[test]
+    fn elicit_content_value_conversions() {
+        let s: ElicitContentValue = "hello".into();
+        assert!(matches!(s, ElicitContentValue::String(_)));
+
+        let i: ElicitContentValue = 42i64.into();
+        assert!(matches!(i, ElicitContentValue::Int(42)));
+
+        let b: ElicitContentValue = true.into();
+        assert!(matches!(b, ElicitContentValue::Bool(true)));
+
+        let f: ElicitContentValue = 3.14.into();
+        assert!(matches!(f, ElicitContentValue::Float(_)));
+
+        let arr: ElicitContentValue = vec!["a".to_string(), "b".to_string()].into();
+        assert!(matches!(arr, ElicitContentValue::StringArray(_)));
+
+        let none: ElicitContentValue = None::<String>.into();
+        assert!(matches!(none, ElicitContentValue::Null));
+    }
+
+    #[test]
+    fn elicit_complete_notification_serialization() {
+        let params = ElicitCompleteNotificationParams::new("elicit-12345");
+        let value = serde_json::to_value(&params).expect("serialize");
+        assert_eq!(value["elicitationId"], "elicit-12345");
+    }
+
+    #[test]
+    fn elicitation_capability_modes() {
+        use crate::types::ElicitationCapability;
+
+        let form_only = ElicitationCapability::form();
+        assert!(form_only.supports_form());
+        assert!(!form_only.supports_url());
+
+        let url_only = ElicitationCapability::url();
+        assert!(!url_only.supports_form());
+        assert!(url_only.supports_url());
+
+        let both = ElicitationCapability::both();
+        assert!(both.supports_form());
+        assert!(both.supports_url());
     }
 }

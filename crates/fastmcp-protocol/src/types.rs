@@ -64,6 +64,9 @@ pub struct ClientCapabilities {
     /// Sampling capability.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sampling: Option<SamplingCapability>,
+    /// Elicitation capability (user input requests).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elicitation: Option<ElicitationCapability>,
     /// Roots capability (filesystem roots).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub roots: Option<RootsCapability>,
@@ -73,12 +76,107 @@ pub struct ClientCapabilities {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SamplingCapability {}
 
+/// Capability for form mode elicitation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FormElicitationCapability {}
+
+/// Capability for URL mode elicitation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UrlElicitationCapability {}
+
+/// Elicitation capability.
+///
+/// Clients must support at least one mode (form or url).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ElicitationCapability {
+    /// Present if the client supports form mode elicitation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub form: Option<FormElicitationCapability>,
+    /// Present if the client supports URL mode elicitation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<UrlElicitationCapability>,
+}
+
+impl ElicitationCapability {
+    /// Creates a form-mode elicitation capability.
+    #[must_use]
+    pub fn form() -> Self {
+        Self {
+            form: Some(FormElicitationCapability {}),
+            url: None,
+        }
+    }
+
+    /// Creates a URL-mode elicitation capability.
+    #[must_use]
+    pub fn url() -> Self {
+        Self {
+            form: None,
+            url: Some(UrlElicitationCapability {}),
+        }
+    }
+
+    /// Creates an elicitation capability supporting both modes.
+    #[must_use]
+    pub fn both() -> Self {
+        Self {
+            form: Some(FormElicitationCapability {}),
+            url: Some(UrlElicitationCapability {}),
+        }
+    }
+
+    /// Returns true if form mode is supported.
+    #[must_use]
+    pub fn supports_form(&self) -> bool {
+        self.form.is_some()
+    }
+
+    /// Returns true if URL mode is supported.
+    #[must_use]
+    pub fn supports_url(&self) -> bool {
+        self.url.is_some()
+    }
+}
+
 /// Roots capability.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RootsCapability {
     /// Whether the client supports list changes notifications.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(rename = "listChanged", default, skip_serializing_if = "std::ops::Not::not")]
     pub list_changed: bool,
+}
+
+/// A root definition representing a filesystem location.
+///
+/// Roots define the boundaries of where servers can operate within the filesystem,
+/// allowing them to understand which directories and files they have access to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Root {
+    /// Unique identifier for the root. Must be a `file://` URI.
+    pub uri: String,
+    /// Optional human-readable name for display purposes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl Root {
+    /// Creates a new root with the given URI.
+    #[must_use]
+    pub fn new(uri: impl Into<String>) -> Self {
+        Self {
+            uri: uri.into(),
+            name: None,
+        }
+    }
+
+    /// Creates a new root with a name.
+    #[must_use]
+    pub fn with_name(uri: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            uri: uri.into(),
+            name: Some(name.into()),
+        }
+    }
 }
 
 /// Server information.
