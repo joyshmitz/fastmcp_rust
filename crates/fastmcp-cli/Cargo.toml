@@ -1,0 +1,35 @@
+[package]
+name = "fastmcp-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "CLI tooling for FastMCP - run, inspect, and install MCP servers"
+
+[[bin]]
+name = "fastmcp"
+path = "src/main.rs"
+
+[dependencies]
+# Internal crates
+fastmcp-client = { workspace = true }
+fastmcp-core = { workspace = true }
+fastmcp-protocol = { workspace = true }
+fastmcp-console = { workspace = true }
+fastmcp-transport = { workspace = true }
+
+# Runtime
+asupersync = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# CLI argument parsing
+clap = { workspace = true }
+
+# Logging
+log = { workspace = true }
+
+[lints]
+workspace = true
