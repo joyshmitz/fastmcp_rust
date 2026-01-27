@@ -1,21 +1,36 @@
 # FastMCP Rust Feature Parity Report
 
 > **Assessment Date:** 2026-01-27
-> **Assessed by:** DustyReef (claude-opus-4-5-20251101)
-> **Methodology:** Porting-to-Rust Phase 5 Conformance Analysis (comprehensive code exploration)
+> **Assessed by:** AzureDeer (claude-opus-4-5-20251101)
+> **Prior Assessors:** DustyReef (claude-opus-4-5-20251101)
+> **Methodology:** Porting-to-Rust Phase 5 Conformance Analysis (comprehensive Python source comparison)
+> **Python FastMCP Version:** 2.14.4
 
 ## Executive Summary
 
-The FastMCP Rust port implements **significantly more** than previously assessed. This updated analysis reflects actual code exploration rather than estimates. The Rust version covers the **core MCP protocol** with excellent cancel-correctness via asupersync, plus several advanced features.
+This is a comprehensive feature parity assessment comparing the Rust port against Python FastMCP v2.14.4. The analysis was conducted by directly examining the Python source at `/home/ubuntu/.local/pipx/venvs/fastmcp/lib/python3.13/site-packages/fastmcp/` (90+ files totaling ~600+ KB).
 
-**Revised Feature Parity: ~70-75%** of Python FastMCP functionality
+**Feature Parity Estimate: ~60-65%** (revised downward after comprehensive source analysis)
+
+The Rust port covers **core MCP protocol functionality well**, but lacks several significant Python FastMCP features:
 
 ### Key Strengths (Better Than Python)
 - **Cancel-correctness**: Cooperative cancellation via checkpoints and masks
 - **4-valued outcomes**: Ok/Err/Cancelled/Panicked (vs Python's 2-valued)
 - **Structured concurrency**: All tasks scoped to regions
-- **Background tasks**: Full Docket/SEP-1686 protocol support
-- **Transport layer**: Complete Stdio, SSE, and WebSocket implementations
+- **Budget system**: Superior timeout mechanism via asupersync
+- **Rich console**: Banners, traffic display, statistics collection
+- **Parallel combinators**: join_all, race, quorum, first_ok
+
+### Key Gaps (Not in Rust)
+- **Full OAuth 2.0/2.1 Server** (93 KB Python module)
+- **OIDC Provider** (18 KB Python module)
+- **Tool Transformations** (37 KB Python module for dynamic tool modification)
+- **Middleware Ecosystem** (caching, rate limiting implementations)
+- **Docket Distributed Task Queue** (Redis/memory backends)
+- **CLI Tooling** (fastmcp run/dev/install/inspect commands)
+- **EventStore** (SSE resumability with TTL)
+- **Elicitation & Roots** (protocol methods)
 
 ---
 
@@ -50,15 +65,18 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 
 | Feature | Python | Rust | Priority | Notes |
 |---------|--------|------|----------|-------|
-| **Middleware pipeline** | ✅ | ✅ | N/A | Basic middleware trait implemented |
-| **Authentication providers** | ✅ | ✅ | N/A | Token/JWT providers implemented |
+| **HTTP transport** | ✅ | ❌ | Medium | `run_http()` creates ASGI app |
+| **Streamable HTTP transport** | ✅ | ❌ | Medium | Stateless HTTP |
+| **FastMCPTransport (in-process)** | ✅ | ❌ | Medium | In-memory testing transport |
 | **Dynamic enable/disable** | ✅ | ❌ | Medium | No visibility control per-session |
 | **Component versioning** | ✅ | ❌ | Low | No version support on components |
-| **Tags for filtering** | ✅ | ❌ | Low | No tag system |
+| **Tags for filtering** | ✅ | ❌ | Medium | `include_tags`/`exclude_tags` |
 | **Icons support** | ✅ | ❌ | Low | Not implemented |
-| **Website URL** | ✅ | ❌ | Low | Not in server config |
-| **Duplicate handling** | ✅ | ❌ | Low | No on_duplicate behavior |
-| **Error masking** | ✅ | ❌ | Medium | Not implemented |
+| **Error masking** | ✅ | ❌ | Medium | `mask_error_details` setting |
+| **Strict input validation** | ✅ | ❌ | Medium | `strict_input_validation` setting |
+| **Duplicate handling** | ✅ | ❌ | Low | `on_duplicate` behavior |
+| **as_proxy() method** | ✅ | ❌ | Medium | Create proxy from existing server |
+| **mount() composition** | ✅ | ❌ | Medium | Mount tools from another FastMCP |
 
 ---
 
@@ -79,7 +97,7 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 | Feature | Python | Rust | Priority | Notes |
 |---------|--------|------|----------|-------|
 | **Icons** | ✅ | ❌ | Low | Not supported |
-| **Tags** | ✅ | ❌ | Low | Not supported |
+| **Tags** | ✅ | ❌ | Medium | For filtering |
 | **Output schema** | ✅ | ❌ | Medium | Tool output schema |
 | **Tool annotations** | ✅ | ❌ | Medium | MCP tool annotations |
 | **Task configuration** | ✅ | 🟡 | Medium | Background tasks work, but not per-handler config |
@@ -102,9 +120,10 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 
 | Feature | Python | Rust | Priority | Notes |
 |---------|--------|------|----------|-------|
-| **HTTP transport** | ✅ | ❌ | Low | Would need HTTP server |
-| **Streamable HTTP** | ✅ | ❌ | Low | Not implemented |
+| **HTTP transport** | ✅ | ❌ | Medium | Would need HTTP server |
+| **Streamable HTTP** | ✅ | ❌ | Medium | Not implemented |
 | **FastMCPTransport (in-process)** | ✅ | ❌ | Medium | No in-memory transport |
+| **Multiple client transport types** | ✅ | 🟡 | Medium | Only stdio subprocess wired |
 | **Transport auth options** | ✅ | 🟡 | Medium | Basic auth exists |
 
 ---
@@ -148,7 +167,7 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 
 | MCP Method | Python | Rust | Priority | Notes |
 |------------|--------|------|----------|-------|
-| **Elicitation** | ✅ | ❌ | Medium | User input requests |
+| **Elicitation** | ✅ | ❌ | **High** | User input requests (18 KB Python module) |
 | **Roots** | ✅ | ❌ | Medium | Filesystem roots |
 
 ---
@@ -172,11 +191,14 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 
 | Feature | Python | Rust | Priority | Notes |
 |---------|--------|------|----------|-------|
-| **SamplingHandler** | ✅ | 🟡 | Low | Types exist, needs wiring |
-| **ElicitationHandler** | ✅ | ❌ | Medium | No elicitation |
-| **RootsHandler** | ✅ | ❌ | Medium | No roots |
-| **SSE/WS client transports** | ✅ | 🟡 | Medium | Protocol exists, not wired |
-| **Multiple transport types** | ✅ | ❌ | Medium | Only stdio subprocess |
+| **SamplingHandler** | ✅ | 🟡 | Medium | Types exist, needs full wiring |
+| **ElicitationHandler** | ✅ | ❌ | **High** | No elicitation callback |
+| **RootsHandler** | ✅ | ❌ | Medium | No roots callback |
+| **SSE client transport** | ✅ | 🟡 | Medium | Protocol exists, not wired |
+| **WebSocket client transport** | ✅ | 🟡 | Medium | Protocol exists, not wired |
+| **MCPConfig client creation** | ✅ | ❌ | Medium | Server registry from files |
+| **Auto-initialize** | ✅ | ❌ | Low | Always manual initialize |
+| **Task client methods** | ✅ | ❌ | Medium | tasks/submit, tasks/list from client |
 
 ---
 
@@ -195,16 +217,18 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 | Session state | ✅ | ✅ | `get_state()` / `set_state()` / `remove_state()` |
 | Auth context | ✅ | ✅ | `auth()` / `set_auth()` |
 | Parallel combinators | ❌ | ✅ | `join_all()`, `race()`, `quorum()`, `first_ok()` |
+| Sampling from handler | ✅ | ✅ | `ctx.sample()` and `ctx.sample_with_request()` |
 
 ### Missing Context Features
 
 | Feature | Python | Rust | Priority | Notes |
 |---------|--------|------|----------|-------|
+| **Elicitation from handler** | ✅ | ❌ | **High** | `Context.elicit()` |
+| **Roots from handler** | ✅ | ❌ | Medium | `Context.get_roots()` |
 | **Logging via context** | ✅ | 🟡 | Medium | Server logs, not handler-level |
 | **Resource reading from handler** | ✅ | ❌ | Medium | Not in McpContext |
 | **Tool calling from handler** | ✅ | ❌ | Medium | Not in McpContext |
 | **MCP capabilities access** | ✅ | ❌ | Low | Not exposed |
-| **Sampling from handler** | ✅ | ✅ | N/A | `ctx.sample()` and `ctx.sample_with_request()` |
 
 ### Dependency Injection
 
@@ -213,6 +237,10 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 | **`Depends()`** | ✅ | ⊘ | Different pattern - explicit context passing |
 | **`CurrentContext()`** | ✅ | ✅ | Context passed as first parameter |
 | **`CurrentFastMCP()`** | ✅ | ❌ | No server access from handlers |
+| **`get_access_token()`** | ✅ | ✅ | Via `ctx.auth()` |
+| **`get_http_headers()`** | ✅ | ❌ | HTTP-specific |
+| **`get_http_request()`** | ✅ | ❌ | HTTP-specific |
+| **`get_docket()`/`get_worker()`** | ✅ | ❌ | No Docket support |
 
 ---
 
@@ -224,6 +252,7 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 | URI parameter matching | ✅ | ✅ | Template matching in macros |
 | RFC 6570 templates | ✅ | 🟡 | Basic support, not full RFC |
 | Query parameter extraction | ✅ | ❌ | Not implemented |
+| Wildcard path support (`{path*}`) | ✅ | ❌ | Not implemented |
 
 ---
 
@@ -241,10 +270,15 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 
 | Feature | Python | Rust | Priority | Notes |
 |---------|--------|------|----------|-------|
-| **OAuth proxy** | ✅ | ❌ | Medium | Not implemented |
-| **OIDC proxy** | ✅ | ❌ | Medium | Not implemented |
+| **Full OAuth 2.0/2.1 Server** | ✅ | ❌ | **High** | 93 KB Python module (oauth_proxy.py) |
+| **OIDC Provider** | ✅ | ❌ | Medium | 18 KB Python module (oidc_proxy.py) |
+| **Authorization code flow** | ✅ | ❌ | **High** | Part of OAuth server |
+| **Token issuance** | ✅ | ❌ | **High** | JWT issuer (jwt_issuer.py) |
+| **Token revocation** | ✅ | ❌ | Medium | OAuth token management |
+| **Client registration** | ✅ | ❌ | Medium | Dynamic client registration |
 | **Required scopes** | ✅ | ❌ | Medium | No scope validation |
 | **Per-handler auth** | ✅ | ❌ | Medium | Only server-level |
+| **Redirect validation** | ✅ | ❌ | Medium | OAuth redirect security |
 
 ---
 
@@ -260,12 +294,14 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 
 ### Missing Middleware Types
 
-| Middleware | Python | Rust | Priority |
-|------------|--------|------|----------|
-| Caching middleware | ✅ | ❌ | Medium |
-| Rate limiting middleware | ✅ | ❌ | Medium |
-| Logging middleware | ✅ | 🟡 | Low (console has logging) |
-| Timing middleware | ✅ | 🟡 | Low (stats has timing) |
+| Middleware | Python | Rust | Priority | Notes |
+|------------|--------|------|----------|-------|
+| **ResponseCachingMiddleware** | ✅ | ❌ | Medium | Async key-value backend, LRU eviction |
+| **RateLimitingMiddleware** | ✅ | ❌ | Medium | Token bucket implementation |
+| **SlidingWindowRateLimiting** | ✅ | ❌ | Medium | Sliding window implementation |
+| **Logging middleware** | ✅ | 🟡 | Low | Console has logging |
+| **Timing middleware** | ✅ | 🟡 | Low | Stats has timing |
+| **ToolInjection middleware** | ✅ | ❌ | Low | Dynamically inject tools |
 
 ---
 
@@ -274,8 +310,20 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 | Feature | Python | Rust | Notes |
 |---------|--------|------|-------|
 | **Proxy to remote server** | ✅ | ✅ | `ProxyClient`, `ProxyCatalog` |
-| **FilesystemProvider** | ✅ | ❌ | Not implemented |
-| **OpenAPIProvider** | ✅ | ⊘ | Excluded per plan |
+| **ProxyToolManager** | ✅ | ✅ | Tool proxying |
+| **ProxyResourceManager** | ✅ | ✅ | Resource proxying |
+| **ProxyPromptManager** | ✅ | ✅ | Prompt proxying |
+
+### Missing Providers
+
+| Provider | Python | Rust | Priority | Notes |
+|----------|--------|------|----------|-------|
+| **Tool Transformations** | ✅ | ❌ | Medium | 37 KB Python module (tool_transform.py) |
+| **TransformedTool** | ✅ | ❌ | Medium | Dynamic tool modification |
+| **ArgTransform** | ✅ | ❌ | Medium | Argument transformation rules |
+| **forward()/forward_raw()** | ✅ | ❌ | Medium | Transformation chaining |
+| **FilesystemProvider** | ✅ | ❌ | Low | Not implemented |
+| **OpenAPIProvider** | ✅ | ⊘ | N/A | Excluded per plan |
 
 ---
 
@@ -289,6 +337,19 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 | Banner configuration | ✅ | ✅ | BannerStyle enum |
 | Traffic verbosity | ✅ | ✅ | TrafficVerbosity enum |
 | Environment variables | ✅ | ✅ | FASTMCP_LOG, FASTMCP_NO_BANNER, etc. |
+
+### Missing Configuration
+
+| Config | Python | Rust | Priority | Notes |
+|--------|--------|------|----------|-------|
+| **Settings class (Pydantic)** | ✅ | ❌ | Medium | Full config management |
+| **DocketSettings** | ✅ | ❌ | Medium | Task queue configuration |
+| **ExperimentalSettings** | ✅ | ❌ | Low | Feature flags |
+| **MCPConfig file support** | ✅ | ❌ | Medium | Server registry from files |
+| **include_tags/exclude_tags** | ✅ | ❌ | Medium | Component filtering |
+| **HTTP settings** | ✅ | ❌ | Medium | host, port, paths |
+| **mask_error_details** | ✅ | ❌ | Medium | Security feature |
+| **check_for_updates** | ✅ | ❌ | Low | Version checking |
 
 ---
 
@@ -304,26 +365,57 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 
 ---
 
+## 13. CLI Tooling
+
+| Command | Python | Rust | Priority | Notes |
+|---------|--------|------|----------|-------|
+| **`fastmcp run`** | ✅ | ❌ | Medium | Run a server |
+| **`fastmcp dev`** | ✅ | ❌ | Medium | Development mode |
+| **`fastmcp install`** | ✅ | ❌ | Low | Install/configure servers |
+| **`fastmcp inspect`** | ✅ | ❌ | Low | Introspect capabilities |
+| **`fastmcp list`** | ✅ | ❌ | Low | List available servers |
+| **`fastmcp test`** | ✅ | ❌ | Low | Test server connectivity |
+| **`fastmcp tasks`** | ✅ | ❌ | Low | Task queue management |
+
+---
+
+## 14. Advanced Features
+
+| Feature | Python | Rust | Priority | Notes |
+|---------|--------|------|----------|-------|
+| **Docket (distributed tasks)** | ✅ | ❌ | **High** | Redis/memory backends, worker coordination |
+| **EventStore** | ✅ | ❌ | Medium | SSE event storage for resumability |
+| **LowLevelServer** | ✅ | ❌ | Low | MCP SDK wrapper |
+| **MiddlewareServerSession** | ✅ | ❌ | Low | Session with middleware routing |
+| **Rich content types** | ✅ | 🟡 | Medium | Audio/File/Image helpers |
+
+---
+
 ## Summary of Critical Gaps
 
-### High Priority (Needed for Feature Parity)
+### High Priority (Blocking Full Parity)
 
-1. ~~**Sampling/Completions**~~ - ✅ Implemented (`ctx.sample()` + protocol types)
-2. **Elicitation** - No user input request support
-3. **Roots** - No filesystem roots support
+1. **Elicitation** - User input request protocol (Python has 18 KB module)
+2. **Full OAuth 2.0/2.1 Server** - Major Python feature (93 KB oauth_proxy.py)
+3. **Docket Integration** - Distributed task queue with Redis backend
+4. **Tool Transformations** - Dynamic tool modification (37 KB tool_transform.py)
 
 ### Medium Priority
 
-4. **Dynamic visibility control** - No per-session component enable/disable
-5. **Per-handler configuration** - Timeout, auth, task config per handler
-6. **Resource/tool calling from handlers** - Context lacks these methods
-7. **In-memory transport** - For testing without subprocess
+5. **HTTP/Streamable transports** - Enable non-subprocess deployment
+6. **Middleware implementations** - Caching, rate limiting
+7. **OIDC Provider** - OpenID Connect support (18 KB oidc_proxy.py)
+8. **MCPConfig support** - Server registry from config files
+9. **Roots protocol** - Filesystem roots listing
+10. **In-process transport** - `FastMCPTransport` for unit tests
+11. **EventStore** - SSE event storage with TTL
 
 ### Lower Priority
 
-8. **Component metadata** - Tags, icons, versions
-9. **Full RFC 6570** - Query parameters in resource templates
-10. **Additional providers** - Filesystem, OpenAPI
+12. **CLI tooling** - fastmcp run/dev/install/inspect
+13. **Component metadata** - Tags, icons, versions
+14. **Full RFC 6570** - Query parameters, wildcards
+15. **Server composition** - mount(), as_proxy()
 
 ---
 
@@ -332,8 +424,8 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 1. Pydantic integration → Replaced by serde
 2. Python decorators → Replaced by proc macros
 3. TestClient (httpx) → Using Lab runtime
-4. CLI tools (fastmcp dev) → Different Rust paradigm
-5. OpenAPI provider → Out of scope
+4. OpenAPI provider → Out of scope
+5. TypeAdapter caching → serde handles differently
 
 ---
 
@@ -347,31 +439,55 @@ The FastMCP Rust port implements **significantly more** than previously assessed
 6. **Budget system** - Superior to simple timeouts
 7. **Statistics collection** - Built-in server stats
 8. **Rich console** - Banners, traffic display, logging
+9. **Masking** - Critical section protection
 
 ---
 
 ## Conclusion
 
-The FastMCP Rust port is **significantly more complete** than the prior assessment suggested. It successfully implements:
+The FastMCP Rust port provides a **solid foundation** for MCP protocol operations:
 
-- **All core MCP protocol methods** including pagination
-- **Background tasks** (Docket/SEP-1686) - fully functional
-- **Three transport types** - Stdio, SSE, WebSocket
-- **Authentication framework** - Token and JWT support
-- **Middleware system** - Request/response/error hooks
-- **Proxy support** - Can proxy to remote MCP servers
-- **Session state** - Key-value storage per session
-- **Cancel-correct async** - Superior to Python
+**What works well:**
+- Core protocol methods (tools, resources, prompts)
+- Background tasks (SEP-1686 protocol, in-memory only)
+- Three transport types (Stdio, SSE, WebSocket)
+- Basic authentication (static tokens + JWT)
+- Middleware framework (trait defined, no implementations)
+- Proxy support for remote servers
+- Cancel-correct async (superior to Python)
+- Rich console and statistics
+- Sampling protocol (types + context methods)
+
+**What's missing for production parity:**
+- Full OAuth 2.0/2.1 authentication server (large Python feature)
+- Elicitation protocol for user input
+- Distributed task queues (Docket with Redis)
+- Middleware implementations (caching, rate limiting)
+- CLI tooling for development workflows
+- Client transport flexibility (SSE/WS connections)
+- Tool transformations for dynamic schemas
+- OIDC provider integration
+
+**Estimated completion:** ~60-65%
 
 The port is suitable for:
-- Production MCP servers with tools/resources/prompts
+- Simple MCP servers with tools/resources/prompts
 - Applications requiring cancel-correct async
-- Systems needing background task execution
+- Systems needing background task execution (in-memory)
 - Binary distribution scenarios
 
-The main gaps are:
-- Elicitation/roots protocol methods
-- Dynamic per-session visibility control
-- Per-handler configuration (timeout, auth)
+For production deployments requiring OAuth, distributed tasks, advanced middleware, or elicitation, significant additional work is needed.
 
-The project is approximately **70-75% feature complete** compared to Python FastMCP, with several areas where Rust implementation is **superior** (cancel-correctness, structured concurrency, 4-valued outcomes).
+---
+
+## Beads for Gap Implementation
+
+The following high-priority gaps should be tracked as beads:
+
+1. **Elicitation Protocol** - `elicit()` method in McpContext
+2. **OAuth 2.0/2.1 Server** - Full authorization code flow
+3. **Docket Distributed Tasks** - Redis/memory backend
+4. **Tool Transformations** - Dynamic schema modification
+5. **Roots Protocol** - Filesystem roots listing
+6. **Caching Middleware** - Response caching with async backend
+7. **Rate Limiting Middleware** - Token bucket/sliding window
