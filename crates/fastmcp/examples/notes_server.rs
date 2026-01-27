@@ -261,7 +261,7 @@ fn notes_stats(_ctx: &McpContext) -> String {
     let stats = serde_json::json!({
         "total_notes": total_notes,
         "total_content_length": total_content_length,
-        "average_content_length": if total_notes > 0 { total_content_length / total_notes } else { 0 },
+        "average_content_length": total_content_length.checked_div(total_notes).unwrap_or(0),
         "unique_tags": tag_counts.len(),
         "tag_counts": tag_counts
     });

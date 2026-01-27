@@ -340,7 +340,7 @@ mod tests {
         assert_eq!(renderer.format_duration(Duration::from_secs(45)), "45s");
         assert_eq!(renderer.format_duration(Duration::from_secs(90)), "1m 30s");
         assert_eq!(
-            renderer.format_duration(Duration::from_secs(3 * 3600 + 5 * 60)),
+            renderer.format_duration(Duration::from_mins(185)),
             "3h 5m"
         );
     }

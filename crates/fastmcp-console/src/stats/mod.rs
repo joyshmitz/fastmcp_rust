@@ -141,11 +141,10 @@ impl ServerStats {
             resource_reads: self.inner.resource_reads.load(Ordering::Relaxed),
             prompt_gets: self.inner.prompt_gets.load(Ordering::Relaxed),
             list_operations: self.inner.list_operations.load(Ordering::Relaxed),
-            avg_latency: if total > 0 {
-                Duration::from_micros(total_latency / total)
-            } else {
-                Duration::ZERO
-            },
+            avg_latency: total_latency
+                .checked_div(total)
+                .map(Duration::from_micros)
+                .unwrap_or(Duration::ZERO),
             max_latency: Duration::from_micros(max_latency),
             min_latency: if min_latency == u64::MAX {
                 Duration::ZERO
