@@ -14,6 +14,8 @@ asupersync.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
+toml.workspace = true
+dirs.workspace = true
 
 [lints]
 workspace = true

@@ -9,6 +9,7 @@ members = [
     "crates/fastmcp-client",
     "crates/fastmcp-macros",
     "crates/fastmcp-console",
+    "crates/fastmcp-cli",
 ]
 
 [workspace.package]
@@ -32,8 +33,15 @@ log = "0.4"
 # Date/time
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 
+# Configuration file parsing
+toml = "0.8"
+dirs = "6"
+
 # Cryptographic RNG (for WebSocket masking)
 getrandom = "0.3"
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 
 # Internal crates
 fastmcp = { path = "crates/fastmcp" }
@@ -44,6 +52,7 @@ fastmcp-server = { path = "crates/fastmcp-server" }
 fastmcp-client = { path = "crates/fastmcp-client" }
 fastmcp-macros = { path = "crates/fastmcp-macros" }
 fastmcp-console = { path = "crates/fastmcp-console" }
+fastmcp-cli = { path = "crates/fastmcp-cli" }
 
 [workspace.lints.rust]
 unsafe_code = "warn"

@@ -434,8 +434,9 @@ fn format_inspect_json(
             .collect(),
     };
 
-    serde_json::to_string_pretty(&output)
-        .map_err(|e| fastmcp_core::McpError::internal_error(format!("JSON serialization error: {e}")))
+    serde_json::to_string_pretty(&output).map_err(|e| {
+        fastmcp_core::McpError::internal_error(format!("JSON serialization error: {e}"))
+    })
 }
 
 /// Install command: Generate configuration for MCP clients.
@@ -494,7 +495,7 @@ fn install_claude_desktop(config: &(String, McpServerConfig), dry_run: bool) -> 
     }
 
     // Read existing config or create new one
-    let mut existing_config: serde_json::Value = if config_path.exists() {
+    let mut existing_config: serde_json::Value = if std::path::Path::new(&config_path).exists() {
         let content = std::fs::read_to_string(&config_path).map_err(|e| {
             fastmcp_core::McpError::internal_error(format!("Failed to read config: {e}"))
         })?;
@@ -529,7 +530,9 @@ fn install_claude_desktop(config: &(String, McpServerConfig), dry_run: bool) -> 
     // Create parent directory if needed
     if let Some(parent) = std::path::Path::new(&config_path).parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            fastmcp_core::McpError::internal_error(format!("Failed to create config directory: {e}"))
+            fastmcp_core::McpError::internal_error(format!(
+                "Failed to create config directory: {e}"
+            ))
         })?;
     }
 
@@ -622,7 +625,9 @@ fn install_cursor(config: &(String, McpServerConfig), dry_run: bool) -> McpResul
 
     if let Some(parent) = std::path::Path::new(&config_path).parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            fastmcp_core::McpError::internal_error(format!("Failed to create config directory: {e}"))
+            fastmcp_core::McpError::internal_error(format!(
+                "Failed to create config directory: {e}"
+            ))
         })?;
     }
 
@@ -666,7 +671,10 @@ fn install_cline(config: &(String, McpServerConfig), dry_run: bool) -> McpResult
     }
 
     // VSCode settings.json is more complex - just print instructions
-    println!("To add '{name}' to Cline, add the following to your VS Code settings.json:", name = config.0);
+    println!(
+        "To add '{name}' to Cline, add the following to your VS Code settings.json:",
+        name = config.0
+    );
     println!("\n{snippet_str}");
     println!("\nSettings file: {config_path}");
 

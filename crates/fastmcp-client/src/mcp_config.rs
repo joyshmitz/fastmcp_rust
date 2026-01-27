@@ -793,7 +793,7 @@ mod tests {
     fn test_config_error_display() {
         let errors = vec![
             (ConfigError::NotFound("path".into()), "not found"),
-            (ConfigError::ServerNotFound("name".into()), "Server not found"),
+            (ConfigError::ServerNotFound("name".into()), "server not found"),
             (ConfigError::ServerDisabled("name".into()), "disabled"),
             (ConfigError::ParseError("msg".into()), "parse"),
         ];
