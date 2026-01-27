@@ -664,7 +664,7 @@ mod tests {
 
     fn test_request(method: &str, params: Option<serde_json::Value>) -> JsonRpcRequest {
         JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: std::borrow::Cow::Borrowed(fastmcp_protocol::JSONRPC_VERSION),
             method: method.to_string(),
             params,
             id: Some(fastmcp_protocol::RequestId::Number(1)),

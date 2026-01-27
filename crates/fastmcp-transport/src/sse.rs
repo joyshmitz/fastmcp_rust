@@ -976,7 +976,7 @@ event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"ping\",\"id\":1}\n\n";
 
         let cx = Cx::for_testing();
         let message = JsonRpcMessage::Response(JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: std::borrow::Cow::Borrowed(fastmcp_protocol::JSONRPC_VERSION),
             result: Some(serde_json::json!({"status": "ok"})),
             error: None,
             id: Some(fastmcp_protocol::RequestId::Number(1)),
