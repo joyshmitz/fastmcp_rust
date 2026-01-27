@@ -465,7 +465,15 @@ impl<R: Read, W: Write> WsTransport<R, W> {
                     continue;
                 }
                 WsFrameType::Binary => {
-                    // Binary frames not used by MCP, skip
+                    // Per RFC 6455 Section 5.4, data frames MUST NOT be interleaved
+                    // during fragmentation. Reject if we're inside a fragmented message.
+                    if !self.fragment_buffer.is_empty() {
+                        return Err(TransportError::Io(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Received Binary frame while inside fragmented message",
+                        )));
+                    }
+                    // Binary frames not used by MCP, skip otherwise
                     continue;
                 }
                 WsFrameType::Close => {
@@ -783,6 +791,15 @@ impl<R: Read, W: Write> WsClientTransport<R, W> {
                     continue;
                 }
                 WsFrameType::Binary => {
+                    // Per RFC 6455 Section 5.4, data frames MUST NOT be interleaved
+                    // during fragmentation. Reject if we're inside a fragmented message.
+                    if !self.fragment_buffer.is_empty() {
+                        return Err(TransportError::Io(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Received Binary frame while inside fragmented message",
+                        )));
+                    }
+                    // Binary frames not used by MCP, skip otherwise
                     continue;
                 }
                 WsFrameType::Close => {
@@ -1069,6 +1086,32 @@ mod tests {
         let writer: Vec<u8> = Vec::new();
         let mut transport = WsTransport::new(Cursor::new(buffer), writer);
         transport.max_message_size = 8;
+
+        let err = transport.recv(&cx).unwrap_err();
+        assert!(matches!(
+            err,
+            TransportError::Io(ref e) if e.kind() == std::io::ErrorKind::InvalidData
+        ));
+    }
+
+    #[test]
+    fn test_rejects_interleaved_binary_during_fragmentation() {
+        // RFC 6455 Section 5.4: Data frames MUST NOT be interleaved
+        let mut buffer = Vec::new();
+
+        // Text frame start (FIN=0, opcode=Text)
+        buffer.push(0x01);
+        buffer.push(0x05);
+        buffer.extend_from_slice(b"hello");
+
+        // Binary frame (interleaved - MUST be rejected)
+        buffer.push(0x82); // FIN + Binary opcode
+        buffer.push(0x03);
+        buffer.extend_from_slice(b"bad");
+
+        let cx = Cx::for_testing();
+        let writer: Vec<u8> = Vec::new();
+        let mut transport = WsTransport::new(Cursor::new(buffer), writer);
 
         let err = transport.recv(&cx).unwrap_err();
         assert!(matches!(
