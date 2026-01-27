@@ -39,6 +39,9 @@ pub struct Router {
     resources: HashMap<String, BoxedResourceHandler>,
     prompts: HashMap<String, BoxedPromptHandler>,
     resource_templates: HashMap<String, ResourceTemplateEntry>,
+    /// Pre-sorted template keys by specificity (most specific first).
+    /// Updated whenever templates are added/modified.
+    sorted_template_keys: Vec<String>,
 }
 
 impl Router {
@@ -50,7 +53,25 @@ impl Router {
             resources: HashMap::new(),
             prompts: HashMap::new(),
             resource_templates: HashMap::new(),
+            sorted_template_keys: Vec::new(),
         }
+    }
+
+    /// Rebuilds the sorted template keys vector.
+    /// Called after any modification to resource_templates.
+    fn rebuild_sorted_template_keys(&mut self) {
+        self.sorted_template_keys = self.resource_templates.keys().cloned().collect();
+        self.sorted_template_keys.sort_by(|a, b| {
+            let entry_a = &self.resource_templates[a];
+            let entry_b = &self.resource_templates[b];
+            let (a_literals, a_literal_segments, a_segments) = entry_a.matcher.specificity();
+            let (b_literals, b_literal_segments, b_segments) = entry_b.matcher.specificity();
+            b_literals
+                .cmp(&a_literals)
+                .then(b_literal_segments.cmp(&a_literal_segments))
+                .then(b_segments.cmp(&a_segments))
+                .then_with(|| a.cmp(b))
+        });
     }
 
     /// Adds a tool handler.
@@ -73,6 +94,7 @@ impl Router {
             };
             self.resource_templates
                 .insert(template.uri_template.clone(), entry);
+            self.rebuild_sorted_template_keys();
         } else {
             self.resources.insert(def.uri.clone(), boxed);
         }
@@ -86,15 +108,20 @@ impl Router {
             template: template.clone(),
             handler: None,
         };
-        match self.resource_templates.get_mut(&template.uri_template) {
+        let needs_rebuild = match self.resource_templates.get_mut(&template.uri_template) {
             Some(existing) => {
                 existing.template = template;
                 existing.matcher = entry.matcher;
+                false // Key already exists, order unchanged
             }
             None => {
                 self.resource_templates
                     .insert(template.uri_template.clone(), entry);
+                true // New key added, need to rebuild
             }
+        };
+        if needs_rebuild {
+            self.rebuild_sorted_template_keys();
         }
     }
 
@@ -192,19 +219,9 @@ impl Router {
             });
         }
 
-        let mut candidates: Vec<&ResourceTemplateEntry> =
-            self.resource_templates.values().collect();
-        candidates.sort_by(|a, b| {
-            let (a_literals, a_literal_segments, a_segments) = a.matcher.specificity();
-            let (b_literals, b_literal_segments, b_segments) = b.matcher.specificity();
-            b_literals
-                .cmp(&a_literals)
-                .then(b_literal_segments.cmp(&a_literal_segments))
-                .then(b_segments.cmp(&a_segments))
-                .then_with(|| a.template.uri_template.cmp(&b.template.uri_template))
-        });
-
-        for entry in candidates {
+        // Use pre-sorted template keys to avoid sorting on every lookup
+        for key in &self.sorted_template_keys {
+            let entry = &self.resource_templates[key];
             let Some(handler) = entry.handler.as_ref() else {
                 continue;
             };
