@@ -154,14 +154,32 @@ impl WsFrame {
 pub struct WsReader<R> {
     reader: BufReader<R>,
     max_frame_size: usize,
+    /// Whether to require masking (true for server-side, false for client-side).
+    /// Per RFC 6455: servers MUST reject unmasked client frames.
+    require_mask: bool,
 }
 
 impl<R: Read> WsReader<R> {
-    /// Creates a new WebSocket reader.
+    /// Creates a new WebSocket reader for server-side use.
+    ///
+    /// Per RFC 6455, servers MUST reject unmasked frames from clients.
     pub fn new(reader: R) -> Self {
+        Self::with_config(reader, true)
+    }
+
+    /// Creates a new WebSocket reader for client-side use.
+    ///
+    /// Clients receive unmasked frames from servers per RFC 6455.
+    pub fn new_client(reader: R) -> Self {
+        Self::with_config(reader, false)
+    }
+
+    /// Creates a new WebSocket reader with explicit mask requirement.
+    fn with_config(reader: R, require_mask: bool) -> Self {
         Self {
             reader: BufReader::new(reader),
             max_frame_size: 10 * 1024 * 1024,
+            require_mask,
         }
     }
 
@@ -224,6 +242,14 @@ impl<R: Read> WsReader<R> {
             return Err(TransportError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "WebSocket frame length exceeds platform limits",
+            )));
+        }
+
+        // RFC 6455 Section 5.1: Server MUST close connection if client frame is unmasked
+        if self.require_mask && !masked {
+            return Err(TransportError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Client frames MUST be masked per RFC 6455",
             )));
         }
 
@@ -581,28 +607,26 @@ impl<R: Read, W: Write> Transport for WsTransport<R, W> {
 /// Client-side WebSocket mask generation.
 ///
 /// Clients must mask frames per RFC 6455. This struct provides
-/// frame writing with proper masking.
+/// frame writing with proper masking using cryptographically secure
+/// random mask keys.
 pub struct WsClientWriter<W> {
     writer: W,
-    mask_counter: u32,
 }
 
 impl<W: Write> WsClientWriter<W> {
     /// Creates a new client WebSocket writer.
     pub fn new(writer: W) -> Self {
-        Self {
-            writer,
-            mask_counter: 0,
-        }
+        Self { writer }
     }
 
-    /// Generates a simple mask key.
+    /// Generates a cryptographically secure mask key.
     ///
-    /// For production use, this should use a cryptographically secure RNG.
-    /// This implementation uses a simple counter for deterministic testing.
-    fn generate_mask(&mut self) -> [u8; 4] {
-        self.mask_counter = self.mask_counter.wrapping_add(0x12345678);
-        self.mask_counter.to_le_bytes()
+    /// RFC 6455 Section 5.3: The masking key MUST be unpredictable.
+    fn generate_mask() -> [u8; 4] {
+        let mut mask = [0u8; 4];
+        // Use CSPRNG for unpredictable mask keys per RFC 6455
+        getrandom::fill(&mut mask).expect("getrandom should never fail on supported platforms");
+        mask
     }
 
     /// Writes a WebSocket frame with client masking.
@@ -629,8 +653,8 @@ impl<W: Write> WsClientWriter<W> {
             self.writer.write_all(&(payload_len as u64).to_be_bytes())?;
         }
 
-        // Write mask key
-        let mask = self.generate_mask();
+        // Write mask key (cryptographically random per RFC 6455)
+        let mask = Self::generate_mask();
         self.writer.write_all(&mask)?;
 
         // Write masked payload
@@ -663,7 +687,8 @@ impl<R: Read, W: Write> WsClientTransport<R, W> {
     /// Creates a new client WebSocket transport.
     pub fn new(reader: R, writer: W) -> Self {
         Self {
-            reader: WsReader::new(reader),
+            // Client receives unmasked frames from server
+            reader: WsReader::new_client(reader),
             writer: WsClientWriter::new(writer),
             codec: Codec::new(),
             fragment_buffer: Vec::new(),
@@ -918,15 +943,15 @@ mod tests {
     fn test_write_read_small_frame() {
         let mut buffer = Vec::new();
 
-        // Write frame
+        // Write frame (server-side, unmasked)
         {
             let mut writer = WsWriter::new(&mut buffer);
             let frame = WsFrame::text("hello");
             writer.write_frame(&frame).unwrap();
         }
 
-        // Read frame back
-        let mut reader = WsReader::new(Cursor::new(buffer));
+        // Read frame back (client-side, accepts unmasked)
+        let mut reader = WsReader::new_client(Cursor::new(buffer));
         let frame = reader.read_frame().unwrap();
 
         assert_eq!(frame.frame_type, WsFrameType::Text);
@@ -946,7 +971,8 @@ mod tests {
             writer.write_frame(&frame).unwrap();
         }
 
-        let mut reader = WsReader::new(Cursor::new(buffer));
+        // Client-side reader accepts unmasked frames
+        let mut reader = WsReader::new_client(Cursor::new(buffer));
         let frame = reader.read_frame().unwrap();
 
         assert_eq!(frame.as_text().unwrap(), payload);
@@ -964,7 +990,8 @@ mod tests {
             writer.write_frame(&frame).unwrap();
         }
 
-        let mut reader = WsReader::new(Cursor::new(buffer));
+        // Client-side reader accepts unmasked frames
+        let mut reader = WsReader::new_client(Cursor::new(buffer));
         let frame = reader.read_frame().unwrap();
 
         assert_eq!(frame.as_text().unwrap(), payload);
@@ -1010,10 +1037,20 @@ mod tests {
 
     #[test]
     fn test_reader_rejects_oversized_frame() {
+        // Build a masked frame for server-side testing
+        let mask = [0x12, 0x34, 0x56, 0x78];
+        let payload = b"hey";
+        let masked: Vec<u8> = payload
+            .iter()
+            .enumerate()
+            .map(|(i, b)| b ^ mask[i % 4])
+            .collect();
+
         let mut buffer = Vec::new();
         buffer.push(0x81); // FIN + Text opcode
-        buffer.push(0x03); // 3-byte payload
-        buffer.extend_from_slice(b"hey");
+        buffer.push(0x80 | 0x03); // Mask bit + 3-byte payload
+        buffer.extend_from_slice(&mask);
+        buffer.extend_from_slice(&masked);
 
         let mut reader = WsReader::new(Cursor::new(buffer));
         reader.max_frame_size = 2;
@@ -1029,8 +1066,9 @@ mod tests {
     fn test_reader_rejects_control_frame_over_125() {
         let mut buffer = Vec::new();
         buffer.push(0x89); // FIN + Ping opcode
-        buffer.push(126); // Extended length (not allowed for control frames)
+        buffer.push(0x80 | 126); // Mask bit + Extended length (not allowed for control frames)
         buffer.extend_from_slice(&126u16.to_be_bytes());
+        buffer.extend_from_slice(&[0, 0, 0, 0]); // Mask key
 
         let mut reader = WsReader::new(Cursor::new(buffer));
         let err = reader.read_frame().unwrap_err();
@@ -1044,7 +1082,8 @@ mod tests {
     fn test_reader_rejects_fragmented_control_frame() {
         let mut buffer = Vec::new();
         buffer.push(0x09); // FIN=0 + Ping opcode
-        buffer.push(0x00); // Zero payload
+        buffer.push(0x80); // Mask bit + Zero payload
+        buffer.extend_from_slice(&[0, 0, 0, 0]); // Mask key
 
         let mut reader = WsReader::new(Cursor::new(buffer));
         let err = reader.read_frame().unwrap_err();
@@ -1058,7 +1097,8 @@ mod tests {
     fn test_reader_rejects_rsv_bits() {
         let mut buffer = Vec::new();
         buffer.push(0xC1); // FIN + RSV1 + Text opcode
-        buffer.push(0x00); // Zero payload
+        buffer.push(0x80); // Mask bit set + Zero payload
+        buffer.extend_from_slice(&[0, 0, 0, 0]); // Mask key
 
         let mut reader = WsReader::new(Cursor::new(buffer));
         let err = reader.read_frame().unwrap_err();
@@ -1066,6 +1106,37 @@ mod tests {
             err,
             TransportError::Io(ref e) if e.kind() == std::io::ErrorKind::InvalidData
         ));
+    }
+
+    #[test]
+    fn test_server_rejects_unmasked_client_frames() {
+        // RFC 6455 Section 5.1: Server MUST reject unmasked frames
+        let mut buffer = Vec::new();
+        buffer.push(0x81); // FIN + Text opcode
+        buffer.push(0x05); // NO mask bit + 5-byte payload
+        buffer.extend_from_slice(b"hello");
+
+        // Server-side reader (requires masking)
+        let mut reader = WsReader::new(Cursor::new(buffer));
+        let err = reader.read_frame().unwrap_err();
+        assert!(matches!(
+            err,
+            TransportError::Io(ref e) if e.kind() == std::io::ErrorKind::InvalidData
+        ));
+    }
+
+    #[test]
+    fn test_client_accepts_unmasked_server_frames() {
+        // Clients receive unmasked frames from servers
+        let mut buffer = Vec::new();
+        buffer.push(0x81); // FIN + Text opcode
+        buffer.push(0x05); // NO mask bit + 5-byte payload
+        buffer.extend_from_slice(b"hello");
+
+        // Client-side reader (does not require masking)
+        let mut reader = WsReader::new_client(Cursor::new(buffer));
+        let frame = reader.read_frame().unwrap();
+        assert_eq!(frame.as_text().unwrap(), "hello");
     }
 
     #[test]
@@ -1163,10 +1234,11 @@ mod tests {
 
     #[test]
     fn test_close_frame_returns_closed_error() {
-        // Build a close frame
+        // Build a masked close frame (simulating client -> server)
         let mut buffer = Vec::new();
         buffer.push(0x88); // FIN + Close opcode
-        buffer.push(0x00); // No payload
+        buffer.push(0x80); // Masked, 0 payload length
+        buffer.extend_from_slice(&[0u8; 4]); // Mask key (zeros work for empty payload)
 
         let cx = Cx::for_testing();
         let writer: Vec<u8> = Vec::new();
