@@ -128,6 +128,71 @@ fn is_string_type(ty: &Type) -> bool {
     false
 }
 
+/// Parses a human-readable duration string and returns milliseconds.
+///
+/// Supports formats like "30s", "5m", "1h", "500ms", "1h30m".
+fn parse_duration_to_millis(s: &str) -> Result<u64, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty string".to_string());
+    }
+
+    let mut total_millis: u64 = 0;
+    let mut current_num = String::new();
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c.is_ascii_digit() {
+            current_num.push(c);
+        } else if c.is_ascii_alphabetic() {
+            if current_num.is_empty() {
+                return Err(format!("unexpected unit character '{c}' without preceding number"));
+            }
+
+            let num: u64 = current_num.parse().map_err(|_| format!("invalid number: {current_num}"))?;
+
+            // Check for multi-character units (ms)
+            let unit = if c == 'm' && chars.peek() == Some(&'s') {
+                chars.next(); // consume 's'
+                "ms"
+            } else {
+                // Single character unit
+                match c {
+                    'h' => "h",
+                    'm' => "m",
+                    's' => "s",
+                    _ => return Err(format!("unknown unit '{c}'")),
+                }
+            };
+
+            let millis = match unit {
+                "ms" => num,
+                "s" => num * 1000,
+                "m" => num * 60 * 1000,
+                "h" => num * 60 * 60 * 1000,
+                _ => unreachable!(),
+            };
+
+            total_millis = total_millis.saturating_add(millis);
+            current_num.clear();
+        } else if c.is_whitespace() {
+            continue;
+        } else {
+            return Err(format!("unexpected character '{c}'"));
+        }
+    }
+
+    if !current_num.is_empty() {
+        return Err(format!("number '{current_num}' missing unit (use s, m, h, or ms)"));
+    }
+
+    if total_millis == 0 {
+        return Err("duration must be greater than zero".to_string());
+    }
+
+    Ok(total_millis)
+}
+
 /// Extracts template parameter names from a URI template string.
 fn extract_template_params(uri: &str) -> Vec<String> {
     let mut params = Vec::new();
@@ -574,12 +639,14 @@ fn type_to_json_schema(ty: &Type) -> TokenStream2 {
 struct ToolAttrs {
     name: Option<String>,
     description: Option<String>,
+    timeout: Option<String>,
 }
 
 impl Parse for ToolAttrs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut name = None;
         let mut description = None;
+        let mut timeout = None;
 
         while !input.is_empty() {
             let ident: Ident = input.parse()?;
@@ -594,6 +661,10 @@ impl Parse for ToolAttrs {
                     let lit: LitStr = input.parse()?;
                     description = Some(lit.value());
                 }
+                "timeout" => {
+                    let lit: LitStr = input.parse()?;
+                    timeout = Some(lit.value());
+                }
                 _ => {
                     return Err(syn::Error::new(ident.span(), "unknown attribute"));
                 }
@@ -604,7 +675,7 @@ impl Parse for ToolAttrs {
             }
         }
 
-        Ok(Self { name, description })
+        Ok(Self { name, description, timeout })
     }
 }
 

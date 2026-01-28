@@ -44,6 +44,7 @@ pub use context::{
     SamplingRequestMessage, SamplingResponse, SamplingRole, SamplingSender, SamplingStopReason,
     ToolCallResult, ToolCaller, ToolContentItem,
 };
+pub use duration::{ParseDurationError, parse_duration};
 pub use error::{
     McpError, McpErrorCode, McpOutcome, McpResult, OutcomeExt, ResultExt, cancelled, err, ok,
 };
