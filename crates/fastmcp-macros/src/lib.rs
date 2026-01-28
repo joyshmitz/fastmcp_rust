@@ -903,6 +903,7 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
                         "properties": properties,
                         "required": required,
                     }),
+                    output_schema: #output_schema_field,
                     icon: None,
                     version: None,
                     tags: vec![],
@@ -911,6 +912,8 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             #timeout_tokens
+
+            #output_schema_method
 
             fn call(
                 &self,

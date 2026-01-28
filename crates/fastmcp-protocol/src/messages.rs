@@ -2001,4 +2001,83 @@ mod tests {
         let empty = ToolAnnotations::new();
         assert!(empty.is_empty());
     }
+
+    // ========================================================================
+    // Tool Output Schema Serialization Tests
+    // ========================================================================
+
+    #[test]
+    fn tool_output_schema_serialization() {
+        use crate::types::Tool;
+
+        // Tool without output_schema (None should not appear in JSON)
+        let tool = Tool {
+            name: "my_tool".to_string(),
+            description: None,
+            input_schema: serde_json::json!({"type": "object"}),
+            output_schema: None,
+            icon: None,
+            version: None,
+            tags: vec![],
+            annotations: None,
+        };
+        let json = serde_json::to_value(&tool).expect("serialize");
+        assert!(
+            json.get("outputSchema").is_none(),
+            "None output_schema should not appear in JSON"
+        );
+
+        // Tool with output_schema
+        let tool = Tool {
+            name: "compute".to_string(),
+            description: Some("Computes a result".to_string()),
+            input_schema: serde_json::json!({"type": "object"}),
+            output_schema: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "result": {"type": "number"},
+                    "success": {"type": "boolean"}
+                }
+            })),
+            icon: None,
+            version: None,
+            tags: vec![],
+            annotations: None,
+        };
+        let json = serde_json::to_value(&tool).expect("serialize");
+        let output_schema = json.get("outputSchema").expect("outputSchema field");
+        assert_eq!(output_schema["type"], "object");
+        assert!(output_schema["properties"]["result"]["type"] == "number");
+        assert!(output_schema["properties"]["success"]["type"] == "boolean");
+    }
+
+    #[test]
+    fn tool_output_schema_deserialization() {
+        use crate::types::Tool;
+
+        // Deserialize tool without output_schema
+        let json = serde_json::json!({
+            "name": "tool",
+            "inputSchema": {"type": "object"}
+        });
+        let tool: Tool = serde_json::from_value(json).expect("deserialize");
+        assert!(tool.output_schema.is_none());
+
+        // Deserialize tool with output_schema
+        let json = serde_json::json!({
+            "name": "compute",
+            "inputSchema": {"type": "object"},
+            "outputSchema": {
+                "type": "object",
+                "properties": {
+                    "value": {"type": "integer"}
+                }
+            }
+        });
+        let tool: Tool = serde_json::from_value(json).expect("deserialize");
+        assert!(tool.output_schema.is_some());
+        let schema = tool.output_schema.unwrap();
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["properties"]["value"]["type"], "integer");
+    }
 }

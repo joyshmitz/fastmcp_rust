@@ -21,6 +21,7 @@ fn main() {
             },
             "required": ["a", "b"]
         }),
+        output_schema: None,
         icon: None,
         version: None,
         tags: vec![],

@@ -420,6 +420,7 @@ impl ToolHandler for LoggingBlockingTool {
                 "type": "object",
                 "properties": { "request_id": { "type": "integer" } }
             }),
+            output_schema: None,
             icon: None,
             version: None,
             tags: vec![],
@@ -3381,6 +3382,7 @@ mod multi_handler_tests {
                         "name": {"type": "string"}
                     }
                 }),
+                output_schema: None,
                 icon: None,
                 version: None,
                 tags: vec![],
@@ -3979,6 +3981,7 @@ mod mount_tests {
                         "sql": {"type": "string"}
                     }
                 }),
+                output_schema: None,
                 icon: None,
                 version: None,
                 tags: vec![],
@@ -4892,6 +4895,7 @@ mod ctx_call_tool_tests {
                     },
                     "required": ["a", "b"]
                 }),
+                output_schema: None,
                 icon: None,
                 version: None,
                 tags: vec![],
@@ -4921,6 +4925,7 @@ mod ctx_call_tool_tests {
                     "type": "object",
                     "properties": {}
                 }),
+                output_schema: None,
                 icon: None,
                 version: None,
                 tags: vec![],

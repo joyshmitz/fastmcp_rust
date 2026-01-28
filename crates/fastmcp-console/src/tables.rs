@@ -826,6 +826,7 @@ mod tests {
                     },
                     "required": ["expression"]
                 }),
+                output_schema: None,
                 icon: None,
                 version: None,
                 tags: vec![],
@@ -844,6 +845,7 @@ mod tests {
                     },
                     "required": ["pattern"]
                 }),
+                output_schema: None,
                 icon: None,
                 version: None,
                 tags: vec![],
