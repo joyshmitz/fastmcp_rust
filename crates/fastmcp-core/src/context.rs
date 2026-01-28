@@ -702,6 +702,116 @@ pub trait ToolCaller: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = crate::McpResult<ToolCallResult>> + Send + '_>>;
 }
 
+// ============================================================================
+// Capabilities Info
+// ============================================================================
+
+/// Client capability information accessible from handlers.
+///
+/// This provides a simplified view of what capabilities the connected client
+/// supports. Use this to adapt handler behavior based on client capabilities.
+#[derive(Debug, Clone, Default)]
+pub struct ClientCapabilityInfo {
+    /// Whether the client supports sampling (LLM completions).
+    pub sampling: bool,
+    /// Whether the client supports elicitation (user input requests).
+    pub elicitation: bool,
+    /// Whether the client supports form-mode elicitation.
+    pub elicitation_form: bool,
+    /// Whether the client supports URL-mode elicitation.
+    pub elicitation_url: bool,
+    /// Whether the client supports roots listing.
+    pub roots: bool,
+    /// Whether the client wants list_changed notifications for roots.
+    pub roots_list_changed: bool,
+}
+
+impl ClientCapabilityInfo {
+    /// Creates a new empty capability info (no capabilities).
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates capability info with sampling enabled.
+    #[must_use]
+    pub fn with_sampling(mut self) -> Self {
+        self.sampling = true;
+        self
+    }
+
+    /// Creates capability info with elicitation enabled.
+    #[must_use]
+    pub fn with_elicitation(mut self, form: bool, url: bool) -> Self {
+        self.elicitation = form || url;
+        self.elicitation_form = form;
+        self.elicitation_url = url;
+        self
+    }
+
+    /// Creates capability info with roots enabled.
+    #[must_use]
+    pub fn with_roots(mut self, list_changed: bool) -> Self {
+        self.roots = true;
+        self.roots_list_changed = list_changed;
+        self
+    }
+}
+
+/// Server capability information accessible from handlers.
+///
+/// This provides a simplified view of what capabilities this server advertises.
+#[derive(Debug, Clone, Default)]
+pub struct ServerCapabilityInfo {
+    /// Whether the server supports tools.
+    pub tools: bool,
+    /// Whether the server supports resources.
+    pub resources: bool,
+    /// Whether resources support subscriptions.
+    pub resources_subscribe: bool,
+    /// Whether the server supports prompts.
+    pub prompts: bool,
+    /// Whether the server supports logging.
+    pub logging: bool,
+}
+
+impl ServerCapabilityInfo {
+    /// Creates a new empty server capability info.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates capability info with tools enabled.
+    #[must_use]
+    pub fn with_tools(mut self) -> Self {
+        self.tools = true;
+        self
+    }
+
+    /// Creates capability info with resources enabled.
+    #[must_use]
+    pub fn with_resources(mut self, subscribe: bool) -> Self {
+        self.resources = true;
+        self.resources_subscribe = subscribe;
+        self
+    }
+
+    /// Creates capability info with prompts enabled.
+    #[must_use]
+    pub fn with_prompts(mut self) -> Self {
+        self.prompts = true;
+        self
+    }
+
+    /// Creates capability info with logging enabled.
+    #[must_use]
+    pub fn with_logging(mut self) -> Self {
+        self.logging = true;
+        self
+    }
+}
+
 /// A no-op notification sender used when progress reporting is disabled.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoOpNotificationSender;
@@ -814,6 +924,10 @@ pub struct McpContext {
     tool_caller: Option<Arc<dyn ToolCaller>>,
     /// Current tool call depth (to prevent infinite recursion).
     tool_call_depth: u32,
+    /// Client capability information.
+    client_capabilities: Option<ClientCapabilityInfo>,
+    /// Server capability information.
+    server_capabilities: Option<ServerCapabilityInfo>,
 }
 
 impl std::fmt::Debug for McpContext {
@@ -829,6 +943,8 @@ impl std::fmt::Debug for McpContext {
             .field("resource_read_depth", &self.resource_read_depth)
             .field("tool_caller", &self.tool_caller.is_some())
             .field("tool_call_depth", &self.tool_call_depth)
+            .field("client_capabilities", &self.client_capabilities)
+            .field("server_capabilities", &self.server_capabilities)
             .finish()
     }
 }
@@ -851,6 +967,8 @@ impl McpContext {
             resource_read_depth: 0,
             tool_caller: None,
             tool_call_depth: 0,
+            client_capabilities: None,
+            server_capabilities: None,
         }
     }
 
@@ -870,6 +988,8 @@ impl McpContext {
             resource_read_depth: 0,
             tool_caller: None,
             tool_call_depth: 0,
+            client_capabilities: None,
+            server_capabilities: None,
         }
     }
 
@@ -890,6 +1010,8 @@ impl McpContext {
             resource_read_depth: 0,
             tool_caller: None,
             tool_call_depth: 0,
+            client_capabilities: None,
+            server_capabilities: None,
         }
     }
 
@@ -912,6 +1034,8 @@ impl McpContext {
             resource_read_depth: 0,
             tool_caller: None,
             tool_call_depth: 0,
+            client_capabilities: None,
+            server_capabilities: None,
         }
     }
 
