@@ -140,14 +140,12 @@ fn make_strict_schema(schema: &Value) -> Value {
             }
 
             // Recursively process nested schemas
-            if let Some(properties) = obj.get("properties") {
-                if let Value::Object(props) = properties {
-                    let strict_props: serde_json::Map<String, Value> = props
-                        .iter()
-                        .map(|(k, v)| (k.clone(), make_strict_schema(v)))
-                        .collect();
-                    new_obj.insert("properties".to_string(), Value::Object(strict_props));
-                }
+            if let Some(Value::Object(props)) = obj.get("properties") {
+                let strict_props: serde_json::Map<String, Value> = props
+                    .iter()
+                    .map(|(k, v)| (k.clone(), make_strict_schema(v)))
+                    .collect();
+                new_obj.insert("properties".to_string(), Value::Object(strict_props));
             }
 
             // Handle additionalProperties if it's a schema object
@@ -166,11 +164,9 @@ fn make_strict_schema(schema: &Value) -> Value {
             }
 
             // Handle prefixItems for tuple validation
-            if let Some(prefix_items) = obj.get("prefixItems") {
-                if let Value::Array(arr) = prefix_items {
-                    let strict_items: Vec<Value> = arr.iter().map(make_strict_schema).collect();
-                    new_obj.insert("prefixItems".to_string(), Value::Array(strict_items));
-                }
+            if let Some(Value::Array(arr)) = obj.get("prefixItems") {
+                let strict_items: Vec<Value> = arr.iter().map(make_strict_schema).collect();
+                new_obj.insert("prefixItems".to_string(), Value::Array(strict_items));
             }
 
             Value::Object(new_obj)

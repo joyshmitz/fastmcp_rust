@@ -31,7 +31,7 @@ pub use builder::ClientBuilder;
 pub use session::ClientSession;
 
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use asupersync::Cx;
@@ -88,6 +88,11 @@ pub struct Client {
     next_id: AtomicU64,
     /// Request timeout in milliseconds (0 = no timeout).
     timeout_ms: u64,
+    /// Whether auto-initialization is enabled (for documentation/debugging).
+    #[allow(dead_code)]
+    auto_initialize: bool,
+    /// Whether the client has been initialized.
+    initialized: AtomicBool,
 }
 
 impl Client {
@@ -153,6 +158,8 @@ impl Client {
             ),
             next_id: AtomicU64::new(1),
             timeout_ms: 30_000, // Default 30 second timeout
+            auto_initialize: false,
+            initialized: AtomicBool::new(false),
         };
 
         // Perform initialization handshake
@@ -169,6 +176,9 @@ impl Client {
 
         // Send initialized notification
         client.send_notification("initialized", serde_json::json!({}))?;
+
+        // Mark as initialized
+        client.initialized.store(true, Ordering::SeqCst);
 
         Ok(client)
     }
@@ -196,7 +206,77 @@ impl Client {
             session,
             next_id: AtomicU64::new(2), // Start at 2 since initialize used 1
             timeout_ms,
+            auto_initialize: false,
+            initialized: AtomicBool::new(true), // Already initialized by builder
         }
+    }
+
+    /// Creates an uninitialized client for auto-initialize mode.
+    ///
+    /// This is an internal constructor used by the builder when auto_initialize is enabled.
+    pub(crate) fn from_parts_uninitialized(
+        child: Child,
+        transport: StdioTransport<ChildStdout, ChildStdin>,
+        cx: Cx,
+        session: ClientSession,
+        timeout_ms: u64,
+    ) -> Self {
+        Self {
+            child,
+            transport,
+            cx,
+            session,
+            next_id: AtomicU64::new(1), // Start at 1 since initialize hasn't happened
+            timeout_ms,
+            auto_initialize: true,
+            initialized: AtomicBool::new(false),
+        }
+    }
+
+    /// Ensures the client is initialized.
+    ///
+    /// In auto-initialize mode, this performs the initialization handshake on first call.
+    /// In normal mode, this is a no-op since the client is already initialized.
+    ///
+    /// Since this method takes `&mut self`, Rust's borrowing rules guarantee exclusive
+    /// access, so no additional synchronization is needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if initialization fails.
+    pub fn ensure_initialized(&mut self) -> McpResult<()> {
+        // Already initialized - nothing to do
+        if self.initialized.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        // Perform initialization
+        let client_info = self.session.client_info().clone();
+        let capabilities = self.session.client_capabilities().clone();
+        let init_result = self.initialize(client_info, capabilities)?;
+
+        // Update session with server response
+        self.session = ClientSession::new(
+            self.session.client_info().clone(),
+            self.session.client_capabilities().clone(),
+            init_result.server_info,
+            init_result.capabilities,
+            init_result.protocol_version,
+        );
+
+        // Send initialized notification
+        self.send_notification("initialized", serde_json::json!({}))?;
+
+        // Mark as initialized
+        self.initialized.store(true, Ordering::SeqCst);
+
+        Ok(())
+    }
+
+    /// Returns whether the client has been initialized.
+    #[must_use]
+    pub fn is_initialized(&self) -> bool {
+        self.initialized.load(Ordering::SeqCst)
     }
 
     /// Returns the server info after initialization.
@@ -209,6 +289,12 @@ impl Client {
     #[must_use]
     pub fn server_capabilities(&self) -> &ServerCapabilities {
         self.session.server_capabilities()
+    }
+
+    /// Returns the protocol version negotiated during initialization.
+    #[must_use]
+    pub fn protocol_version(&self) -> &str {
+        self.session.protocol_version()
     }
 
     /// Generates the next request ID.
@@ -382,6 +468,7 @@ impl Client {
     ///
     /// Returns an error if the request fails.
     pub fn list_tools(&mut self) -> McpResult<Vec<Tool>> {
+        self.ensure_initialized()?;
         let params = ListToolsParams::default();
         let result: ListToolsResult = self.send_request("tools/list", params)?;
         Ok(result.tools)
@@ -397,6 +484,7 @@ impl Client {
         name: &str,
         arguments: serde_json::Value,
     ) -> McpResult<Vec<Content>> {
+        self.ensure_initialized()?;
         let params = CallToolParams {
             name: name.to_string(),
             arguments: Some(arguments),
@@ -440,6 +528,7 @@ impl Client {
         arguments: serde_json::Value,
         on_progress: ProgressCallback<'_>,
     ) -> McpResult<Vec<Content>> {
+        self.ensure_initialized()?;
         // Generate a unique request ID and reuse it as the progress token.
         let request_id = self.next_request_id();
         #[allow(clippy::cast_possible_wrap)]
@@ -606,6 +695,7 @@ impl Client {
     ///
     /// Returns an error if the request fails.
     pub fn list_resources(&mut self) -> McpResult<Vec<Resource>> {
+        self.ensure_initialized()?;
         let params = ListResourcesParams::default();
         let result: ListResourcesResult = self.send_request("resources/list", params)?;
         Ok(result.resources)
@@ -617,6 +707,7 @@ impl Client {
     ///
     /// Returns an error if the request fails.
     pub fn list_resource_templates(&mut self) -> McpResult<Vec<ResourceTemplate>> {
+        self.ensure_initialized()?;
         let params = ListResourceTemplatesParams::default();
         let result: ListResourceTemplatesResult =
             self.send_request("resources/templates/list", params)?;
@@ -629,6 +720,7 @@ impl Client {
     ///
     /// Returns an error if the request fails.
     pub fn set_log_level(&mut self, level: LogLevel) -> McpResult<()> {
+        self.ensure_initialized()?;
         let params = SetLogLevelParams { level };
         let _: serde_json::Value = self.send_request("logging/setLevel", params)?;
         Ok(())
@@ -640,6 +732,7 @@ impl Client {
     ///
     /// Returns an error if the resource cannot be read.
     pub fn read_resource(&mut self, uri: &str) -> McpResult<Vec<ResourceContent>> {
+        self.ensure_initialized()?;
         let params = ReadResourceParams {
             uri: uri.to_string(),
             meta: None,
@@ -654,6 +747,7 @@ impl Client {
     ///
     /// Returns an error if the request fails.
     pub fn list_prompts(&mut self) -> McpResult<Vec<Prompt>> {
+        self.ensure_initialized()?;
         let params = ListPromptsParams::default();
         let result: ListPromptsResult = self.send_request("prompts/list", params)?;
         Ok(result.prompts)
@@ -669,6 +763,7 @@ impl Client {
         name: &str,
         arguments: std::collections::HashMap<String, String>,
     ) -> McpResult<Vec<PromptMessage>> {
+        self.ensure_initialized()?;
         let params = GetPromptParams {
             name: name.to_string(),
             arguments: if arguments.is_empty() {
@@ -701,6 +796,7 @@ impl Client {
         task_type: &str,
         input: serde_json::Value,
     ) -> McpResult<TaskInfo> {
+        self.ensure_initialized()?;
         let params = SubmitTaskParams {
             task_type: task_type.to_string(),
             params: Some(input),
@@ -724,6 +820,7 @@ impl Client {
         status: Option<TaskStatus>,
         cursor: Option<&str>,
     ) -> McpResult<ListTasksResult> {
+        self.ensure_initialized()?;
         let params = ListTasksParams {
             cursor: cursor.map(ToString::to_string),
             status,
@@ -741,6 +838,7 @@ impl Client {
     ///
     /// Returns an error if the task is not found or the request fails.
     pub fn get_task(&mut self, task_id: &str) -> McpResult<GetTaskResult> {
+        self.ensure_initialized()?;
         let params = GetTaskParams {
             id: TaskId::from_string(task_id),
         };
@@ -775,6 +873,7 @@ impl Client {
         task_id: &str,
         reason: Option<&str>,
     ) -> McpResult<TaskInfo> {
+        self.ensure_initialized()?;
         let params = CancelTaskParams {
             id: TaskId::from_string(task_id),
             reason: reason.map(ToString::to_string),

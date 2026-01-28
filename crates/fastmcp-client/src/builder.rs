@@ -79,6 +79,8 @@ pub struct ClientBuilder {
     inherit_env: bool,
     /// Client capabilities to advertise.
     capabilities: ClientCapabilities,
+    /// Whether to defer initialization until first use.
+    auto_initialize: bool,
 }
 
 impl ClientBuilder {
@@ -90,6 +92,7 @@ impl ClientBuilder {
     /// - Max retries: 0 (no retries)
     /// - Retry delay: 1 second
     /// - Inherit environment: true
+    /// - Auto-initialize: false (initialize immediately on connect)
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -104,6 +107,7 @@ impl ClientBuilder {
             env_vars: HashMap::new(),
             inherit_env: true,
             capabilities: ClientCapabilities::default(),
+            auto_initialize: false,
         }
     }
 
@@ -199,6 +203,31 @@ impl ClientBuilder {
         self
     }
 
+    /// Enables auto-initialization mode.
+    ///
+    /// When enabled, the client defers the MCP initialization handshake until
+    /// the first method call (e.g., `list_tools`, `call_tool`). This allows
+    /// the subprocess to start immediately without blocking on initialization.
+    ///
+    /// Default is `false` (initialize immediately on connect).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let client = ClientBuilder::new()
+    ///     .auto_initialize(true)
+    ///     .connect_stdio("uvx", &["my-server"])?;
+    ///
+    /// // Subprocess is running but not yet initialized
+    /// // Initialization happens on first use:
+    /// let tools = client.list_tools()?; // Initializes here
+    /// ```
+    #[must_use]
+    pub fn auto_initialize(mut self, enabled: bool) -> Self {
+        self.auto_initialize = enabled;
+        self
+    }
+
     /// Connects to a server via stdio subprocess.
     ///
     /// Spawns the specified command as a subprocess and communicates via
@@ -285,8 +314,41 @@ impl ClientBuilder {
         // Create transport
         let transport = StdioTransport::new(stdout, stdin);
 
-        // Perform initialization
-        self.initialize_client(child, transport, cx)
+        if self.auto_initialize {
+            // Create uninitialized client - initialization will happen on first use
+            Ok(self.create_uninitialized_client(child, transport, cx))
+        } else {
+            // Perform initialization immediately
+            self.initialize_client(child, transport, cx)
+        }
+    }
+
+    /// Creates an uninitialized client for auto-initialize mode.
+    fn create_uninitialized_client(
+        &self,
+        child: Child,
+        transport: StdioTransport<std::process::ChildStdout, std::process::ChildStdin>,
+        cx: &Cx,
+    ) -> Client {
+        // Create a placeholder session - will be updated on first use
+        let session = ClientSession::new(
+            self.client_info.clone(),
+            self.capabilities.clone(),
+            fastmcp_protocol::ServerInfo {
+                name: String::new(),
+                version: String::new(),
+            },
+            fastmcp_protocol::ServerCapabilities::default(),
+            String::new(),
+        );
+
+        Client::from_parts_uninitialized(
+            child,
+            transport,
+            cx.clone(),
+            session,
+            self.timeout_ms,
+        )
     }
 
     /// Performs the initialization handshake and creates the client.
@@ -402,6 +464,7 @@ mod tests {
         assert!(builder.inherit_env);
         assert!(builder.working_dir.is_none());
         assert!(builder.env_vars.is_empty());
+        assert!(!builder.auto_initialize);
     }
 
     #[test]
@@ -446,5 +509,14 @@ mod tests {
 
         assert_eq!(builder2.client_info.name, "test");
         assert_eq!(builder2.timeout_ms, 5000);
+    }
+
+    #[test]
+    fn test_builder_auto_initialize() {
+        let builder = ClientBuilder::new().auto_initialize(true);
+        assert!(builder.auto_initialize);
+
+        let builder = ClientBuilder::new().auto_initialize(false);
+        assert!(!builder.auto_initialize);
     }
 }

@@ -108,6 +108,42 @@ enum Commands {
         /// If not specified, lists from all detected clients.
         #[arg(long, short = 't')]
         target: Option<InstallTarget>,
+
+        /// Path to a custom configuration file.
+        #[arg(long, short = 'c')]
+        config: Option<PathBuf>,
+
+        /// Output format (table, json, yaml).
+        #[arg(long, short = 'f', default_value = "table")]
+        format: ListFormat,
+
+        /// Show full configuration details including environment variables.
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
+
+    /// Test MCP server connectivity.
+    ///
+    /// Spawns the server and tests initialization, capability listing, and ping functionality.
+    Test {
+        /// Server command or path.
+        server: String,
+
+        /// Arguments to pass to the server.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+
+        /// Request timeout in seconds.
+        #[arg(long, default_value = "30")]
+        timeout: u64,
+
+        /// Show detailed output.
+        #[arg(long, short = 'v')]
+        verbose: bool,
+
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Manage background tasks on an MCP server.
@@ -263,6 +299,28 @@ impl std::str::FromStr for InspectFormat {
     }
 }
 
+/// Output format for the list command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum ListFormat {
+    #[default]
+    Table,
+    Json,
+    Yaml,
+}
+
+impl std::str::FromStr for ListFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "table" => Ok(Self::Table),
+            "json" => Ok(Self::Json),
+            "yaml" => Ok(Self::Yaml),
+            _ => Err(format!("Unknown format: {s}. Expected: table, json, yaml")),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InstallTarget {
     Claude,
@@ -308,7 +366,19 @@ fn main() -> ExitCode {
             target,
             dry_run,
         } => cmd_install(&name, &server, &args, target, dry_run),
-        Commands::List { target } => cmd_list(target),
+        Commands::List {
+            target,
+            config,
+            format,
+            verbose,
+        } => cmd_list(target, config, format, verbose),
+        Commands::Test {
+            server,
+            args,
+            timeout,
+            verbose,
+            json,
+        } => cmd_test(&server, &args, timeout, verbose, json),
         Commands::Tasks { action } => cmd_tasks(action),
     };
 
@@ -369,107 +439,490 @@ fn cmd_run(
     Ok(())
 }
 
+/// Server entry for list output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ServerEntry {
+    name: String,
+    source: String,
+    command: String,
+    args: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    env: Option<HashMap<String, String>>,
+    enabled: bool,
+}
+
+/// List output for JSON/YAML serialization.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ListOutput {
+    servers: Vec<ServerEntry>,
+}
+
 /// List command: List configured MCP servers.
-fn cmd_list(target: Option<InstallTarget>) -> McpResult<()> {
+fn cmd_list(
+    target: Option<InstallTarget>,
+    config: Option<PathBuf>,
+    format: ListFormat,
+    verbose: bool,
+) -> McpResult<()> {
     use fastmcp_console::rich_rust::r#box::ROUNDED;
     use fastmcp_console::rich_rust::style::Style;
 
-    let targets = if let Some(t) = target {
-        vec![t]
+    let mut servers: Vec<ServerEntry> = Vec::new();
+
+    // If custom config path is provided, use only that
+    if let Some(config_path) = config {
+        load_servers_from_path(&config_path, "Custom", &mut servers)?;
     } else {
-        vec![
-            InstallTarget::Claude,
-            InstallTarget::Cursor,
-            InstallTarget::Cline,
-        ]
-    };
-
-    let mut table = Table::new()
-        .title("Configured MCP Servers")
-        .box_style(&ROUNDED)
-        .show_header(true);
-
-    table.add_column(Column::new("Client").style(Style::parse("bold cyan").unwrap_or_default()));
-    table.add_column(
-        Column::new("Server Name").style(Style::parse("bold yellow").unwrap_or_default()),
-    );
-    table.add_column(Column::new("Command"));
-    table.add_column(Column::new("Arguments"));
-    table.add_column(Column::new("Environment"));
-
-    let mut found_any = false;
-
-    for t in targets {
-        let (name, config_path) = match t {
-            InstallTarget::Claude => ("Claude", get_claude_desktop_config_path()),
-            InstallTarget::Cursor => ("Cursor", get_cursor_config_path()),
-            InstallTarget::Cline => ("Cline", get_cline_config_path()),
+        // Load from standard targets
+        let targets = if let Some(t) = target {
+            vec![t]
+        } else {
+            vec![
+                InstallTarget::Claude,
+                InstallTarget::Cursor,
+                InstallTarget::Cline,
+            ]
         };
 
-        if let Ok(path) = config_path {
-            if !std::path::Path::new(&path).exists() {
-                continue;
+        for t in targets {
+            let (name, config_path) = match t {
+                InstallTarget::Claude => ("Claude", get_claude_desktop_config_path()),
+                InstallTarget::Cursor => ("Cursor", get_cursor_config_path()),
+                InstallTarget::Cline => ("Cline", get_cline_config_path()),
+            };
+
+            if let Ok(path) = config_path {
+                let path = PathBuf::from(path);
+                if path.exists() {
+                    let _ = load_servers_from_client_config(&path, name, t, &mut servers);
+                }
+            }
+        }
+
+        // Load from project-local configs
+        load_project_local_servers(&mut servers);
+    }
+
+    // Output based on format
+    match format {
+        ListFormat::Table => {
+            if servers.is_empty() {
+                println!("No configured servers found.");
+                return Ok(());
             }
 
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                    // Extract servers based on client type
-                    let servers_map = match t {
-                        InstallTarget::Claude | InstallTarget::Cursor => {
-                            json.get("mcpServers").and_then(|v| v.as_object())
-                        }
-                        InstallTarget::Cline => {
-                            json.get("cline.mcpServers").and_then(|v| v.as_object())
-                        }
+            let mut table = Table::new()
+                .title("Configured MCP Servers")
+                .box_style(&ROUNDED)
+                .show_header(true);
+
+            table.add_column(
+                Column::new("Source").style(Style::parse("bold cyan").unwrap_or_default()),
+            );
+            table.add_column(
+                Column::new("Server Name").style(Style::parse("bold yellow").unwrap_or_default()),
+            );
+            table.add_column(Column::new("Command"));
+            table.add_column(Column::new("Status"));
+
+            if verbose {
+                table.add_column(Column::new("Arguments"));
+                table.add_column(Column::new("Environment"));
+            }
+
+            for entry in &servers {
+                let status = if entry.enabled { "✓ enabled" } else { "✗ disabled" };
+
+                if verbose {
+                    let args = if entry.args.is_empty() {
+                        "-".to_string()
+                    } else {
+                        entry.args.join(" ")
                     };
 
-                    if let Some(servers) = servers_map {
-                        for (server_name, config) in servers {
-                            if let Ok(mcp_config) =
-                                serde_json::from_value::<McpServerConfig>(config.clone())
-                            {
-                                found_any = true;
-                                let args = if mcp_config.args.is_empty() {
-                                    "-".to_string()
-                                } else {
-                                    mcp_config.args.join(" ")
-                                };
-
-                                let env = if let Some(e) = &mcp_config.env {
-                                    if e.is_empty() {
-                                        "-".to_string()
-                                    } else {
-                                        e.iter()
-                                            .map(|(k, v)| format!("{k}={v}"))
-                                            .collect::<Vec<_>>()
-                                            .join(", ")
-                                    }
-                                } else {
-                                    "-".to_string()
-                                };
-
-                                table.add_row_cells([
-                                    name,
-                                    server_name,
-                                    &mcp_config.command,
-                                    &args,
-                                    &env,
-                                ]);
-                            }
+                    let env = if let Some(e) = &entry.env {
+                        if e.is_empty() {
+                            "-".to_string()
+                        } else {
+                            e.iter()
+                                .map(|(k, v)| format!("{k}={v}"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
                         }
+                    } else {
+                        "-".to_string()
+                    };
+
+                    table.add_row_cells([
+                        entry.source.as_str(),
+                        entry.name.as_str(),
+                        entry.command.as_str(),
+                        status,
+                        args.as_str(),
+                        env.as_str(),
+                    ]);
+                } else {
+                    table.add_row_cells([
+                        entry.source.as_str(),
+                        entry.name.as_str(),
+                        entry.command.as_str(),
+                        status,
+                    ]);
+                }
+            }
+
+            fastmcp_console::console().render(&table);
+        }
+        ListFormat::Json => {
+            let output = ListOutput { servers };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&output).unwrap_or_default()
+            );
+        }
+        ListFormat::Yaml => {
+            let output = ListOutput { servers };
+            println!("{}", serde_yaml::to_string(&output).unwrap_or_default());
+        }
+    }
+
+    Ok(())
+}
+
+/// Load servers from a client-specific config file.
+fn load_servers_from_client_config(
+    path: &PathBuf,
+    source_name: &str,
+    target: InstallTarget,
+    servers: &mut Vec<ServerEntry>,
+) -> McpResult<()> {
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        fastmcp_core::McpError::internal_error(format!("Failed to read config: {e}"))
+    })?;
+
+    let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+        fastmcp_core::McpError::internal_error(format!("Failed to parse config: {e}"))
+    })?;
+
+    // Extract servers based on client type
+    let servers_map = match target {
+        InstallTarget::Claude | InstallTarget::Cursor => {
+            json.get("mcpServers").and_then(|v| v.as_object())
+        }
+        InstallTarget::Cline => json.get("cline.mcpServers").and_then(|v| v.as_object()),
+    };
+
+    if let Some(map) = servers_map {
+        for (name, config) in map {
+            if let Ok(mcp_config) = serde_json::from_value::<McpServerConfig>(config.clone()) {
+                // Check if disabled (some configs have a "disabled" field)
+                let enabled = !config
+                    .get("disabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
+                servers.push(ServerEntry {
+                    name: name.clone(),
+                    source: source_name.to_string(),
+                    command: mcp_config.command,
+                    args: mcp_config.args,
+                    env: mcp_config.env,
+                    enabled,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Load servers from a custom config path.
+fn load_servers_from_path(path: &PathBuf, source_name: &str, servers: &mut Vec<ServerEntry>) -> McpResult<()> {
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        fastmcp_core::McpError::internal_error(format!("Failed to read config: {e}"))
+    })?;
+
+    // Try to detect format by extension
+    let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    match extension {
+        "toml" => {
+            // Parse as TOML
+            let toml_value: toml::Value = toml::from_str(&content).map_err(|e| {
+                fastmcp_core::McpError::internal_error(format!("Failed to parse TOML: {e}"))
+            })?;
+
+            // Look for [servers] or [mcpServers] table
+            let servers_table = toml_value
+                .get("servers")
+                .or_else(|| toml_value.get("mcpServers"))
+                .and_then(|v| v.as_table());
+
+            if let Some(table) = servers_table {
+                for (name, config) in table {
+                    let command = config
+                        .get("command")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let args = config
+                        .get("args")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let env = config.get("env").and_then(|v| v.as_table()).map(|t| {
+                        t.iter()
+                            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                            .collect()
+                    });
+                    let enabled = !config
+                        .get("disabled")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+
+                    servers.push(ServerEntry {
+                        name: name.clone(),
+                        source: source_name.to_string(),
+                        command,
+                        args,
+                        env,
+                        enabled,
+                    });
+                }
+            }
+        }
+        _ => {
+            // Default to JSON
+            let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+                fastmcp_core::McpError::internal_error(format!("Failed to parse JSON: {e}"))
+            })?;
+
+            let servers_map = json
+                .get("servers")
+                .or_else(|| json.get("mcpServers"))
+                .and_then(|v| v.as_object());
+
+            if let Some(map) = servers_map {
+                for (name, config) in map {
+                    if let Ok(mcp_config) = serde_json::from_value::<McpServerConfig>(config.clone())
+                    {
+                        let enabled = !config
+                            .get("disabled")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+
+                        servers.push(ServerEntry {
+                            name: name.clone(),
+                            source: source_name.to_string(),
+                            command: mcp_config.command,
+                            args: mcp_config.args,
+                            env: mcp_config.env,
+                            enabled,
+                        });
                     }
                 }
             }
         }
     }
 
-    if found_any {
-        fastmcp_console::console().render(&table);
-    } else {
-        println!("No configured servers found.");
+    Ok(())
+}
+
+/// Load servers from project-local config files.
+fn load_project_local_servers(servers: &mut Vec<ServerEntry>) {
+    // Check for ./mcp.json
+    let mcp_json = PathBuf::from("./mcp.json");
+    if mcp_json.exists() {
+        let _ = load_servers_from_path(&mcp_json, "Project (mcp.json)", servers);
     }
 
-    Ok(())
+    // Check for ./mcp.toml
+    let mcp_toml = PathBuf::from("./mcp.toml");
+    if mcp_toml.exists() {
+        let _ = load_servers_from_path(&mcp_toml, "Project (mcp.toml)", servers);
+    }
+}
+
+/// Test result for a single test.
+#[derive(Debug, Clone, Serialize)]
+struct TestResult {
+    name: String,
+    success: bool,
+    duration_ms: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+/// Full test report output.
+#[derive(Debug, Clone, Serialize)]
+struct TestReport {
+    server: String,
+    success: bool,
+    tests: Vec<TestResult>,
+    total_duration_ms: f64,
+}
+
+/// Test command: Test MCP server connectivity.
+fn cmd_test(
+    server: &str,
+    args: &[String],
+    timeout_secs: u64,
+    verbose: bool,
+    json_output: bool,
+) -> McpResult<()> {
+    use std::time::Instant;
+
+    let total_start = Instant::now();
+    let args_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+
+    if !json_output {
+        println!("Testing server: {server}");
+    }
+
+    // Connect to server
+    let mut client = fastmcp_client::ClientBuilder::new()
+        .timeout_ms(timeout_secs * 1000)
+        .connect_stdio(server, &args_refs)?;
+
+    let mut results: Vec<TestResult> = Vec::new();
+
+    // Test 1: Initialize (already done by connect_stdio)
+    let init_start = Instant::now();
+    let init_result = TestResult {
+        name: "initialize".to_string(),
+        success: true,
+        duration_ms: init_start.elapsed().as_secs_f64() * 1000.0,
+        details: Some(format!("protocol {}", client.protocol_version())),
+        error: None,
+    };
+    if !json_output {
+        print_test_result(&init_result, verbose);
+    }
+    results.push(init_result);
+
+    // Test 2: List tools
+    let tools_result = run_test("list_tools", || {
+        let tools = client.list_tools()?;
+        Ok(format!("{} tools", tools.len()))
+    });
+    if !json_output {
+        print_test_result(&tools_result, verbose);
+    }
+    results.push(tools_result);
+
+    // Test 3: List resources
+    let resources_result = run_test("list_resources", || {
+        let resources = client.list_resources()?;
+        Ok(format!("{} resources", resources.len()))
+    });
+    if !json_output {
+        print_test_result(&resources_result, verbose);
+    }
+    results.push(resources_result);
+
+    // Test 4: List prompts
+    let prompts_result = run_test("list_prompts", || {
+        let prompts = client.list_prompts()?;
+        Ok(format!("{} prompts", prompts.len()))
+    });
+    if !json_output {
+        print_test_result(&prompts_result, verbose);
+    }
+    results.push(prompts_result);
+
+    // Clean up
+    client.close();
+
+    // Build report
+    let all_passed = results.iter().all(|r| r.success);
+    let total_duration_ms = total_start.elapsed().as_secs_f64() * 1000.0;
+
+    let report = TestReport {
+        server: server.to_string(),
+        success: all_passed,
+        tests: results,
+        total_duration_ms,
+    };
+
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).unwrap_or_default()
+        );
+    } else {
+        println!();
+        if all_passed {
+            println!("All tests passed!");
+        } else {
+            println!("Some tests failed.");
+        }
+    }
+
+    if all_passed {
+        Ok(())
+    } else {
+        Err(fastmcp_core::McpError::internal_error("Some tests failed"))
+    }
+}
+
+/// Run a single test and measure its duration.
+fn run_test<F>(name: &str, test_fn: F) -> TestResult
+where
+    F: FnOnce() -> McpResult<String>,
+{
+    let start = std::time::Instant::now();
+    match test_fn() {
+        Ok(details) => TestResult {
+            name: name.to_string(),
+            success: true,
+            duration_ms: start.elapsed().as_secs_f64() * 1000.0,
+            details: if details.is_empty() {
+                None
+            } else {
+                Some(details)
+            },
+            error: None,
+        },
+        Err(e) => TestResult {
+            name: name.to_string(),
+            success: false,
+            duration_ms: start.elapsed().as_secs_f64() * 1000.0,
+            details: None,
+            error: Some(e.to_string()),
+        },
+    }
+}
+
+/// Print a single test result.
+fn print_test_result(result: &TestResult, verbose: bool) {
+    let status = if result.success { "✓" } else { "✗" };
+    let name = &result.name;
+    let duration = result.duration_ms;
+
+    if result.success {
+        if let Some(details) = &result.details {
+            if details.is_empty() {
+                println!("  {status} {name}: {duration:.1}ms");
+            } else {
+                println!("  {status} {name}: {duration:.1}ms ({details})");
+            }
+        } else {
+            println!("  {status} {name}: {duration:.1}ms");
+        }
+    } else {
+        println!("  {status} {name}: {duration:.1}ms");
+        if verbose {
+            if let Some(error) = &result.error {
+                println!("      Error: {error}");
+            }
+        }
+    }
 }
 
 /// Tasks command: Manage background tasks on an MCP server.
