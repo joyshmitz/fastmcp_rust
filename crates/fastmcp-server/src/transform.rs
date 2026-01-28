@@ -361,6 +361,7 @@ impl TransformedToolBuilder {
             input_schema,
             icon: parent.icon.clone(),
             version: parent.version.clone(),
+            tags: parent.tags.clone(),
         }
     }
 
@@ -503,6 +504,7 @@ mod tests {
                 input_schema: self.schema.clone(),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 

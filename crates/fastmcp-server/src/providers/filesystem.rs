@@ -594,6 +594,7 @@ impl FilesystemResourceHandler {
                     mime_type: Some(entry.mime_type),
                     icon: None,
                     version: None,
+                    tags: vec![],
                 })
                 .collect(),
             Err(_) => Vec::new(),
@@ -620,6 +621,7 @@ impl ResourceHandler for FilesystemResourceHandler {
             mime_type: None,
             icon: None,
             version: None,
+            tags: vec![],
         }
     }
 
@@ -635,6 +637,7 @@ impl ResourceHandler for FilesystemResourceHandler {
             mime_type: None,
             icon: None,
             version: None,
+            tags: vec![],
         })
     }
 

@@ -230,6 +230,14 @@ pub trait ToolHandler: Send + Sync {
         None
     }
 
+    /// Returns the tool's tags for filtering and organization.
+    ///
+    /// Default implementation returns an empty slice. Override to provide tags.
+    /// Note: Tags can also be set directly in `definition()`.
+    fn tags(&self) -> &[String] {
+        &[]
+    }
+
     /// Calls the tool synchronously with the given arguments.
     ///
     /// This is the default implementation point. Override this for simple
@@ -298,6 +306,14 @@ pub trait ResourceHandler: Send + Sync {
     /// Note: Version can also be set directly in `definition()`.
     fn version(&self) -> Option<&str> {
         None
+    }
+
+    /// Returns the resource's tags for filtering and organization.
+    ///
+    /// Default implementation returns an empty slice. Override to provide tags.
+    /// Note: Tags can also be set directly in `definition()`.
+    fn tags(&self) -> &[String] {
+        &[]
     }
 
     /// Reads the resource content synchronously.
@@ -394,6 +410,14 @@ pub trait PromptHandler: Send + Sync {
         None
     }
 
+    /// Returns the prompt's tags for filtering and organization.
+    ///
+    /// Default implementation returns an empty slice. Override to provide tags.
+    /// Note: Tags can also be set directly in `definition()`.
+    fn tags(&self) -> &[String] {
+        &[]
+    }
+
     /// Gets the prompt messages synchronously with the given arguments.
     ///
     /// This is the default implementation point. Override this for simple
@@ -465,6 +489,10 @@ impl ToolHandler for MountedToolHandler {
         def
     }
 
+    fn tags(&self) -> &[String] {
+        self.inner.tags()
+    }
+
     fn call(&self, ctx: &McpContext, arguments: serde_json::Value) -> McpResult<Vec<Content>> {
         self.inner.call(ctx, arguments)
     }
@@ -522,6 +550,10 @@ impl ResourceHandler for MountedResourceHandler {
         self.mounted_template.clone()
     }
 
+    fn tags(&self) -> &[String] {
+        self.inner.tags()
+    }
+
     fn read(&self, ctx: &McpContext) -> McpResult<Vec<ResourceContent>> {
         self.inner.read(ctx)
     }
@@ -575,6 +607,10 @@ impl PromptHandler for MountedPromptHandler {
         let mut def = self.inner.definition();
         def.name.clone_from(&self.mounted_name);
         def
+    }
+
+    fn tags(&self) -> &[String] {
+        self.inner.tags()
     }
 
     fn get(

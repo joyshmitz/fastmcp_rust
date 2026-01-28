@@ -1029,6 +1029,7 @@ mod tests {
                 mime_type: Some("text/plain".to_string()),
                 icon: None,
                 version: None,
+            tags: vec![],
             }],
         };
 
@@ -1481,6 +1482,7 @@ mod tests {
             input_schema: serde_json::json!({"type": "object"}),
             icon: None,
             version: None,
+            tags: vec![],
         };
         let json = serde_json::to_value(&tool).expect("serialize");
         assert!(json.get("version").is_none());
@@ -1492,6 +1494,7 @@ mod tests {
             input_schema: serde_json::json!({"type": "object"}),
             icon: None,
             version: Some("1.2.3".to_string()),
+            tags: vec![],
         };
         let json = serde_json::to_value(&tool).expect("serialize");
         assert_eq!(json["version"], "1.2.3");
@@ -1509,6 +1512,7 @@ mod tests {
             mime_type: Some("text/plain".to_string()),
             icon: None,
             version: None,
+            tags: vec![],
         };
         let json = serde_json::to_value(&resource).expect("serialize");
         assert!(json.get("version").is_none());
@@ -1521,6 +1525,7 @@ mod tests {
             mime_type: Some("text/plain".to_string()),
             icon: None,
             version: Some("2.0.0".to_string()),
+            tags: vec![],
         };
         let json = serde_json::to_value(&resource).expect("serialize");
         assert_eq!(json["version"], "2.0.0");
@@ -1537,6 +1542,7 @@ mod tests {
             arguments: vec![],
             icon: None,
             version: None,
+            tags: vec![],
         };
         let json = serde_json::to_value(&prompt).expect("serialize");
         assert!(json.get("version").is_none());
@@ -1548,6 +1554,7 @@ mod tests {
             arguments: vec![],
             icon: None,
             version: Some("0.1.0".to_string()),
+            tags: vec![],
         };
         let json = serde_json::to_value(&prompt).expect("serialize");
         assert_eq!(json["version"], "0.1.0");
@@ -1563,6 +1570,7 @@ mod tests {
             mime_type: None,
             icon: None,
             version: None,
+            tags: vec![],
         };
         let json = serde_json::to_value(&template).expect("serialize");
         assert!(json.get("version").is_none());
@@ -1575,6 +1583,7 @@ mod tests {
             mime_type: None,
             icon: None,
             version: Some("3.0.0".to_string()),
+            tags: vec![],
         };
         let json = serde_json::to_value(&template).expect("serialize");
         assert_eq!(json["version"], "3.0.0");
@@ -1615,5 +1624,181 @@ mod tests {
         });
         let prompt: Prompt = serde_json::from_value(json).expect("deserialize");
         assert!(prompt.version.is_none());
+    }
+
+    // ========================================================================
+    // Tags Serialization Tests
+    // ========================================================================
+
+    #[test]
+    fn tool_tags_serialization() {
+        use crate::types::Tool;
+
+        // Tool without tags (empty vec should not appear in JSON)
+        let tool = Tool {
+            name: "my_tool".to_string(),
+            description: None,
+            input_schema: serde_json::json!({"type": "object"}),
+            icon: None,
+            version: None,
+            tags: vec![],
+        };
+        let json = serde_json::to_value(&tool).expect("serialize");
+        assert!(json.get("tags").is_none(), "Empty tags should not appear in JSON");
+
+        // Tool with tags
+        let tool = Tool {
+            name: "my_tool".to_string(),
+            description: None,
+            input_schema: serde_json::json!({"type": "object"}),
+            icon: None,
+            version: None,
+            tags: vec!["api".to_string(), "database".to_string()],
+        };
+        let json = serde_json::to_value(&tool).expect("serialize");
+        assert_eq!(json["tags"], serde_json::json!(["api", "database"]));
+    }
+
+    #[test]
+    fn resource_tags_serialization() {
+        use crate::types::Resource;
+
+        // Resource without tags
+        let resource = Resource {
+            uri: "file://test".to_string(),
+            name: "Test Resource".to_string(),
+            description: None,
+            mime_type: None,
+            icon: None,
+            version: None,
+            tags: vec![],
+        };
+        let json = serde_json::to_value(&resource).expect("serialize");
+        assert!(json.get("tags").is_none(), "Empty tags should not appear in JSON");
+
+        // Resource with tags
+        let resource = Resource {
+            uri: "file://test".to_string(),
+            name: "Test Resource".to_string(),
+            description: None,
+            mime_type: None,
+            icon: None,
+            version: None,
+            tags: vec!["files".to_string(), "readonly".to_string()],
+        };
+        let json = serde_json::to_value(&resource).expect("serialize");
+        assert_eq!(json["tags"], serde_json::json!(["files", "readonly"]));
+    }
+
+    #[test]
+    fn prompt_tags_serialization() {
+        use crate::types::Prompt;
+
+        // Prompt without tags
+        let prompt = Prompt {
+            name: "greeting".to_string(),
+            description: None,
+            arguments: vec![],
+            icon: None,
+            version: None,
+            tags: vec![],
+        };
+        let json = serde_json::to_value(&prompt).expect("serialize");
+        assert!(json.get("tags").is_none(), "Empty tags should not appear in JSON");
+
+        // Prompt with tags
+        let prompt = Prompt {
+            name: "greeting".to_string(),
+            description: None,
+            arguments: vec![],
+            icon: None,
+            version: None,
+            tags: vec!["templates".to_string(), "onboarding".to_string()],
+        };
+        let json = serde_json::to_value(&prompt).expect("serialize");
+        assert_eq!(json["tags"], serde_json::json!(["templates", "onboarding"]));
+    }
+
+    #[test]
+    fn resource_template_tags_serialization() {
+        // ResourceTemplate without tags
+        let template = ResourceTemplate {
+            uri_template: "file://{path}".to_string(),
+            name: "Files".to_string(),
+            description: None,
+            mime_type: None,
+            icon: None,
+            version: None,
+            tags: vec![],
+        };
+        let json = serde_json::to_value(&template).expect("serialize");
+        assert!(json.get("tags").is_none(), "Empty tags should not appear in JSON");
+
+        // ResourceTemplate with tags
+        let template = ResourceTemplate {
+            uri_template: "file://{path}".to_string(),
+            name: "Files".to_string(),
+            description: None,
+            mime_type: None,
+            icon: None,
+            version: None,
+            tags: vec!["filesystem".to_string()],
+        };
+        let json = serde_json::to_value(&template).expect("serialize");
+        assert_eq!(json["tags"], serde_json::json!(["filesystem"]));
+    }
+
+    #[test]
+    fn tags_deserialization() {
+        use crate::types::{Prompt, Resource, Tool};
+
+        // Deserialize tool without tags field
+        let json = serde_json::json!({
+            "name": "tool",
+            "inputSchema": {"type": "object"}
+        });
+        let tool: Tool = serde_json::from_value(json).expect("deserialize");
+        assert!(tool.tags.is_empty());
+
+        // Deserialize tool with tags
+        let json = serde_json::json!({
+            "name": "tool",
+            "inputSchema": {"type": "object"},
+            "tags": ["compute", "heavy"]
+        });
+        let tool: Tool = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(tool.tags, vec!["compute", "heavy"]);
+
+        // Deserialize resource without tags
+        let json = serde_json::json!({
+            "uri": "file://test",
+            "name": "Test"
+        });
+        let resource: Resource = serde_json::from_value(json).expect("deserialize");
+        assert!(resource.tags.is_empty());
+
+        // Deserialize resource with tags
+        let json = serde_json::json!({
+            "uri": "file://test",
+            "name": "Test",
+            "tags": ["data"]
+        });
+        let resource: Resource = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(resource.tags, vec!["data"]);
+
+        // Deserialize prompt without tags
+        let json = serde_json::json!({
+            "name": "prompt"
+        });
+        let prompt: Prompt = serde_json::from_value(json).expect("deserialize");
+        assert!(prompt.tags.is_empty());
+
+        // Deserialize prompt with tags
+        let json = serde_json::json!({
+            "name": "prompt",
+            "tags": ["greeting", "onboarding"]
+        });
+        let prompt: Prompt = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(prompt.tags, vec!["greeting", "onboarding"]);
     }
 }

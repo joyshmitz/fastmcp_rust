@@ -405,6 +405,7 @@ fn resource_from_template(template: &ResourceTemplate) -> Resource {
         mime_type: template.mime_type.clone(),
         icon: template.icon.clone(),
         version: template.version.clone(),
+        tags: template.tags.clone(),
     }
 }
 
@@ -509,6 +510,7 @@ mod tests {
                 input_schema: serde_json::json!({}),
                 icon: None,
                 version: None,
+                tags: vec![],
             }],
             resources: vec![Resource {
                 uri: "test://resource".to_string(),
@@ -517,6 +519,7 @@ mod tests {
                 mime_type: None,
                 icon: None,
                 version: None,
+                tags: vec![],
             }],
             prompts: vec![Prompt {
                 name: "prompt".to_string(),
@@ -524,6 +527,7 @@ mod tests {
                 arguments: Vec::new(),
                 icon: None,
                 version: None,
+                tags: vec![],
             }],
             ..TestBackend::default()
         };
@@ -544,6 +548,7 @@ mod tests {
                 input_schema: serde_json::json!({}),
                 icon: None,
                 version: None,
+                tags: vec![],
             }],
             state: Arc::clone(&state),
             ..TestBackend::default()
@@ -556,6 +561,7 @@ mod tests {
                 input_schema: serde_json::json!({}),
                 icon: None,
                 version: None,
+                tags: vec![],
             },
             proxy,
         );
@@ -585,6 +591,7 @@ mod tests {
                 arguments: Vec::new(),
                 icon: None,
                 version: None,
+                tags: vec![],
             }],
             state: Arc::clone(&state),
             ..TestBackend::default()
@@ -597,6 +604,7 @@ mod tests {
                 arguments: Vec::new(),
                 icon: None,
                 version: None,
+                tags: vec![],
             },
             proxy,
         );
@@ -631,6 +639,7 @@ mod tests {
                 input_schema: serde_json::json!({}),
                 icon: None,
                 version: None,
+                tags: vec![],
             }],
             state: Arc::clone(&state),
             ..TestBackend::default()
@@ -645,6 +654,7 @@ mod tests {
                 input_schema: serde_json::json!({}),
                 icon: None,
                 version: None,
+                tags: vec![],
             },
             "db",
             proxy,
@@ -675,6 +685,7 @@ mod tests {
                 arguments: Vec::new(),
                 icon: None,
                 version: None,
+                tags: vec![],
             }],
             state: Arc::clone(&state),
             ..TestBackend::default()
@@ -689,6 +700,7 @@ mod tests {
                 arguments: Vec::new(),
                 icon: None,
                 version: None,
+                tags: vec![],
             },
             "templates",
             proxy,
@@ -722,6 +734,7 @@ mod tests {
                 mime_type: None,
                 icon: None,
                 version: None,
+                tags: vec![],
             }],
             ..TestBackend::default()
         };
@@ -736,6 +749,7 @@ mod tests {
                 mime_type: None,
                 icon: None,
                 version: None,
+                tags: vec![],
             },
             "storage",
             proxy,

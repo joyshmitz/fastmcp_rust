@@ -62,6 +62,7 @@ impl ToolHandler for GreetTool {
             }),
             icon: None,
                 version: None,
+                tags: vec![],
         }
     }
 
@@ -87,6 +88,7 @@ impl ToolHandler for CancellationCheckTool {
             input_schema: serde_json::json!({"type": "object"}),
             icon: None,
                 version: None,
+                tags: vec![],
         }
     }
 
@@ -112,6 +114,7 @@ impl ToolHandler for SlowTool {
             input_schema: serde_json::json!({"type": "object"}),
             icon: None,
                 version: None,
+                tags: vec![],
         }
     }
 
@@ -143,6 +146,7 @@ impl ToolHandler for BlockingTool {
             input_schema: serde_json::json!({"type": "object"}),
             icon: None,
                 version: None,
+                tags: vec![],
         }
     }
 
@@ -410,6 +414,7 @@ impl ToolHandler for LoggingBlockingTool {
             }),
             icon: None,
                 version: None,
+                tags: vec![],
         }
     }
 
@@ -446,6 +451,7 @@ impl ToolHandler for ErrorTool {
             input_schema: serde_json::json!({"type": "object"}),
             icon: None,
                 version: None,
+                tags: vec![],
         }
     }
 
@@ -473,6 +479,7 @@ impl ResourceHandler for StaticResource {
             mime_type: Some("text/plain".to_string()),
             icon: None,
                 version: None,
+                tags: vec![],
         }
     }
 
@@ -498,6 +505,7 @@ impl ResourceHandler for CancellableResource {
             mime_type: Some("text/plain".to_string()),
             icon: None,
                 version: None,
+                tags: vec![],
         }
     }
 
@@ -526,6 +534,7 @@ impl ResourceHandler for TemplateResource {
             mime_type: Some("text/plain".to_string()),
             icon: None,
                 version: None,
+                tags: vec![],
         }
     }
 
@@ -537,6 +546,7 @@ impl ResourceHandler for TemplateResource {
             mime_type: Some("text/plain".to_string()),
             icon: None,
                 version: None,
+                tags: vec![],
         })
     }
 
@@ -576,6 +586,7 @@ impl ResourceHandler for SpecificTemplateResource {
             mime_type: Some("text/plain".to_string()),
             icon: None,
                 version: None,
+                tags: vec![],
         }
     }
 
@@ -587,6 +598,7 @@ impl ResourceHandler for SpecificTemplateResource {
             mime_type: Some("text/plain".to_string()),
             icon: None,
                 version: None,
+                tags: vec![],
         })
     }
 
@@ -637,6 +649,7 @@ impl ResourceHandler for LoggingTemplateResource {
             mime_type: Some("text/plain".to_string()),
             icon: None,
                 version: None,
+                tags: vec![],
         }
     }
 
@@ -648,6 +661,7 @@ impl ResourceHandler for LoggingTemplateResource {
             mime_type: Some("text/plain".to_string()),
             icon: None,
                 version: None,
+                tags: vec![],
         })
     }
 
@@ -713,6 +727,7 @@ impl PromptHandler for GreetingPrompt {
             }],
             icon: None,
                 version: None,
+                tags: vec![],
         }
     }
 
@@ -766,6 +781,7 @@ mod router_tests {
             mime_type: Some("text/plain".to_string()),
             icon: None,
                 version: None,
+                tags: vec![],
         });
 
         // Register prompts
@@ -3171,6 +3187,7 @@ mod multi_handler_tests {
                 }),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -3309,6 +3326,7 @@ mod session_state_tests {
                 input_schema: serde_json::json!({"type": "object"}),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -3764,6 +3782,7 @@ mod mount_tests {
                 }),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -3786,6 +3805,7 @@ mod mount_tests {
                 input_schema: serde_json::json!({"type": "object"}),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -3812,6 +3832,7 @@ mod mount_tests {
                 mime_type: Some("application/json".to_string()),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -3836,6 +3857,7 @@ mod mount_tests {
                 arguments: Vec::new(),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -4135,6 +4157,7 @@ mod duplicate_behavior_tests {
                 input_schema: serde_json::json!({"type": "object"}),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -4281,6 +4304,7 @@ mod ctx_read_resource_tests {
                 mime_type: Some("application/json".to_string()),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -4320,6 +4344,7 @@ mod ctx_read_resource_tests {
                 mime_type: Some("text/plain".to_string()),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -4553,6 +4578,7 @@ mod ctx_read_resource_tests {
                 mime_type: Some("text/plain".to_string()),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -4583,6 +4609,7 @@ mod ctx_read_resource_tests {
                 mime_type: Some("text/plain".to_string()),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -4663,6 +4690,7 @@ mod ctx_call_tool_tests {
                 }),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -4690,6 +4718,7 @@ mod ctx_call_tool_tests {
                 }),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -4711,6 +4740,7 @@ mod ctx_call_tool_tests {
                 input_schema: serde_json::json!({"type": "object"}),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -4966,6 +4996,7 @@ mod ctx_call_tool_tests {
                 input_schema: serde_json::json!({"type": "object"}),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 
@@ -4988,6 +5019,7 @@ mod ctx_call_tool_tests {
                 input_schema: serde_json::json!({"type": "object"}),
                 icon: None,
                 version: None,
+                tags: vec![],
             }
         }
 

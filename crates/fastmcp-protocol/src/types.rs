@@ -298,6 +298,9 @@ pub struct Tool {
     /// Component version (semver-like string).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Tags for filtering and organization.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// Resource definition.
@@ -319,6 +322,9 @@ pub struct Resource {
     /// Component version (semver-like string).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Tags for filtering and organization.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// Resource template definition.
@@ -341,6 +347,9 @@ pub struct ResourceTemplate {
     /// Component version (semver-like string).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Tags for filtering and organization.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// Prompt definition.
@@ -360,6 +369,9 @@ pub struct Prompt {
     /// Component version (semver-like string).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Tags for filtering and organization.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// Prompt argument definition.
