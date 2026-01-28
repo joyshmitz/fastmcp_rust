@@ -2086,3 +2086,1066 @@ fn get_cline_config_path() -> McpResult<String> {
         Ok(format!("{home}/.config/Code/User/settings.json"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    // ============================================================================
+    // CLI Argument Parsing Tests
+    // ============================================================================
+
+    mod cli_parsing {
+        use super::*;
+
+        #[test]
+        fn test_run_command_basic() {
+            let cli = Cli::try_parse_from(["fastmcp", "run", "./my-server"]).unwrap();
+            match cli.command {
+                Commands::Run { server, args, cwd, env } => {
+                    assert_eq!(server, "./my-server");
+                    assert!(args.is_empty());
+                    assert!(cwd.is_none());
+                    assert!(env.is_empty());
+                }
+                _ => panic!("Expected Run command"),
+            }
+        }
+
+        #[test]
+        fn test_run_command_with_args() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "run", "./my-server", "--", "--config", "config.json"
+            ]).unwrap();
+            match cli.command {
+                Commands::Run { server, args, .. } => {
+                    assert_eq!(server, "./my-server");
+                    assert_eq!(args, vec!["--config", "config.json"]);
+                }
+                _ => panic!("Expected Run command"),
+            }
+        }
+
+        #[test]
+        fn test_run_command_with_cwd() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "run", "-C", "/tmp/workdir", "./my-server"
+            ]).unwrap();
+            match cli.command {
+                Commands::Run { cwd, .. } => {
+                    assert_eq!(cwd, Some(PathBuf::from("/tmp/workdir")));
+                }
+                _ => panic!("Expected Run command"),
+            }
+        }
+
+        #[test]
+        fn test_run_command_with_env() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "run", "-e", "FOO=bar", "-e", "BAZ=qux", "./server"
+            ]).unwrap();
+            match cli.command {
+                Commands::Run { env, .. } => {
+                    assert_eq!(env, vec!["FOO=bar", "BAZ=qux"]);
+                }
+                _ => panic!("Expected Run command"),
+            }
+        }
+
+        #[test]
+        fn test_inspect_command_basic() {
+            let cli = Cli::try_parse_from(["fastmcp", "inspect", "./server"]).unwrap();
+            match cli.command {
+                Commands::Inspect { server, format, output, .. } => {
+                    assert_eq!(server, "./server");
+                    assert_eq!(format, InspectFormat::Text);
+                    assert!(output.is_none());
+                }
+                _ => panic!("Expected Inspect command"),
+            }
+        }
+
+        #[test]
+        fn test_inspect_command_json_format() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "inspect", "-f", "json", "./server"
+            ]).unwrap();
+            match cli.command {
+                Commands::Inspect { format, .. } => {
+                    assert_eq!(format, InspectFormat::Json);
+                }
+                _ => panic!("Expected Inspect command"),
+            }
+        }
+
+        #[test]
+        fn test_inspect_command_mcp_format() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "inspect", "--format", "mcp", "./server"
+            ]).unwrap();
+            match cli.command {
+                Commands::Inspect { format, .. } => {
+                    assert_eq!(format, InspectFormat::Mcp);
+                }
+                _ => panic!("Expected Inspect command"),
+            }
+        }
+
+        #[test]
+        fn test_inspect_command_with_output() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "inspect", "-o", "output.json", "./server"
+            ]).unwrap();
+            match cli.command {
+                Commands::Inspect { output, .. } => {
+                    assert_eq!(output, Some(PathBuf::from("output.json")));
+                }
+                _ => panic!("Expected Inspect command"),
+            }
+        }
+
+        #[test]
+        fn test_install_command_basic() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "install", "my-server", "./server"
+            ]).unwrap();
+            match cli.command {
+                Commands::Install { name, server, target, dry_run, .. } => {
+                    assert_eq!(name, "my-server");
+                    assert_eq!(server, "./server");
+                    assert_eq!(target, InstallTarget::Claude);
+                    assert!(!dry_run);
+                }
+                _ => panic!("Expected Install command"),
+            }
+        }
+
+        #[test]
+        fn test_install_command_with_target() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "install", "-t", "cursor", "my-server", "./server"
+            ]).unwrap();
+            match cli.command {
+                Commands::Install { target, .. } => {
+                    assert_eq!(target, InstallTarget::Cursor);
+                }
+                _ => panic!("Expected Install command"),
+            }
+        }
+
+        #[test]
+        fn test_install_command_dry_run() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "install", "--dry-run", "my-server", "./server"
+            ]).unwrap();
+            match cli.command {
+                Commands::Install { dry_run, .. } => {
+                    assert!(dry_run);
+                }
+                _ => panic!("Expected Install command"),
+            }
+        }
+
+        #[test]
+        fn test_list_command_default() {
+            let cli = Cli::try_parse_from(["fastmcp", "list"]).unwrap();
+            match cli.command {
+                Commands::List { target, config, format, verbose } => {
+                    assert!(target.is_none());
+                    assert!(config.is_none());
+                    assert_eq!(format, ListFormat::Table);
+                    assert!(!verbose);
+                }
+                _ => panic!("Expected List command"),
+            }
+        }
+
+        #[test]
+        fn test_list_command_with_options() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "list", "-t", "cline", "-f", "json", "-v"
+            ]).unwrap();
+            match cli.command {
+                Commands::List { target, format, verbose, .. } => {
+                    assert_eq!(target, Some(InstallTarget::Cline));
+                    assert_eq!(format, ListFormat::Json);
+                    assert!(verbose);
+                }
+                _ => panic!("Expected List command"),
+            }
+        }
+
+        #[test]
+        fn test_list_command_yaml_format() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "list", "--format", "yaml"
+            ]).unwrap();
+            match cli.command {
+                Commands::List { format, .. } => {
+                    assert_eq!(format, ListFormat::Yaml);
+                }
+                _ => panic!("Expected List command"),
+            }
+        }
+
+        #[test]
+        fn test_test_command_default() {
+            let cli = Cli::try_parse_from(["fastmcp", "test", "./server"]).unwrap();
+            match cli.command {
+                Commands::Test { server, timeout, verbose, json, .. } => {
+                    assert_eq!(server, "./server");
+                    assert_eq!(timeout, 30);
+                    assert!(!verbose);
+                    assert!(!json);
+                }
+                _ => panic!("Expected Test command"),
+            }
+        }
+
+        #[test]
+        fn test_test_command_with_options() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "test", "--timeout", "60", "-v", "--json", "./server"
+            ]).unwrap();
+            match cli.command {
+                Commands::Test { timeout, verbose, json, .. } => {
+                    assert_eq!(timeout, 60);
+                    assert!(verbose);
+                    assert!(json);
+                }
+                _ => panic!("Expected Test command"),
+            }
+        }
+
+        #[test]
+        fn test_dev_command_default() {
+            let cli = Cli::try_parse_from(["fastmcp", "dev", "."]).unwrap();
+            match cli.command {
+                Commands::Dev {
+                    target, host, port, no_reload, transport, debounce, clear, verbose, ..
+                } => {
+                    assert_eq!(target, ".");
+                    assert_eq!(host, "localhost");
+                    assert_eq!(port, 8000);
+                    assert!(!no_reload);
+                    assert_eq!(transport, DevTransport::Stdio);
+                    assert_eq!(debounce, 100);
+                    assert!(!clear);
+                    assert!(!verbose);
+                }
+                _ => panic!("Expected Dev command"),
+            }
+        }
+
+        #[test]
+        fn test_dev_command_with_options() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "dev",
+                "--host", "0.0.0.0",
+                "--port", "3000",
+                "--transport", "sse",
+                "--no-reload",
+                "--clear",
+                "-v",
+                "."
+            ]).unwrap();
+            match cli.command {
+                Commands::Dev {
+                    host, port, transport, no_reload, clear, verbose, ..
+                } => {
+                    assert_eq!(host, "0.0.0.0");
+                    assert_eq!(port, 3000);
+                    assert_eq!(transport, DevTransport::Sse);
+                    assert!(no_reload);
+                    assert!(clear);
+                    assert!(verbose);
+                }
+                _ => panic!("Expected Dev command"),
+            }
+        }
+
+        #[test]
+        fn test_dev_command_http_transport() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "dev", "--transport", "http", "."
+            ]).unwrap();
+            match cli.command {
+                Commands::Dev { transport, .. } => {
+                    assert_eq!(transport, DevTransport::Http);
+                }
+                _ => panic!("Expected Dev command"),
+            }
+        }
+
+        #[test]
+        fn test_tasks_list_command() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "tasks", "list", "./server"
+            ]).unwrap();
+            match cli.command {
+                Commands::Tasks { action: TasksAction::List { server, status, limit, json, .. } } => {
+                    assert_eq!(server, "./server");
+                    assert!(status.is_none());
+                    assert_eq!(limit, 20);
+                    assert!(!json);
+                }
+                _ => panic!("Expected Tasks List command"),
+            }
+        }
+
+        #[test]
+        fn test_tasks_list_with_status_filter() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "tasks", "list", "-s", "running", "-n", "50", "--json", "./server"
+            ]).unwrap();
+            match cli.command {
+                Commands::Tasks { action: TasksAction::List { status, limit, json, .. } } => {
+                    assert_eq!(status, Some(TaskStatusFilter::Running));
+                    assert_eq!(limit, 50);
+                    assert!(json);
+                }
+                _ => panic!("Expected Tasks List command"),
+            }
+        }
+
+        #[test]
+        fn test_tasks_show_command() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "tasks", "show", "./server", "task-001"
+            ]).unwrap();
+            match cli.command {
+                Commands::Tasks { action: TasksAction::Show { server, task_id, json, .. } } => {
+                    assert_eq!(server, "./server");
+                    assert_eq!(task_id, "task-001");
+                    assert!(!json);
+                }
+                _ => panic!("Expected Tasks Show command"),
+            }
+        }
+
+        #[test]
+        fn test_tasks_cancel_command() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "tasks", "cancel", "-r", "no longer needed", "./server", "task-001"
+            ]).unwrap();
+            match cli.command {
+                Commands::Tasks { action: TasksAction::Cancel { server, task_id, reason, .. } } => {
+                    assert_eq!(server, "./server");
+                    assert_eq!(task_id, "task-001");
+                    assert_eq!(reason, Some("no longer needed".to_string()));
+                }
+                _ => panic!("Expected Tasks Cancel command"),
+            }
+        }
+
+        #[test]
+        fn test_tasks_stats_command() {
+            let cli = Cli::try_parse_from([
+                "fastmcp", "tasks", "stats", "--json", "./server"
+            ]).unwrap();
+            match cli.command {
+                Commands::Tasks { action: TasksAction::Stats { server, json, .. } } => {
+                    assert_eq!(server, "./server");
+                    assert!(json);
+                }
+                _ => panic!("Expected Tasks Stats command"),
+            }
+        }
+    }
+
+    // ============================================================================
+    // Enum Parsing Tests
+    // ============================================================================
+
+    mod enum_parsing {
+        use super::*;
+
+        #[test]
+        fn test_task_status_filter_from_str() {
+            assert_eq!("pending".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Pending);
+            assert_eq!("PENDING".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Pending);
+            assert_eq!("running".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Running);
+            assert_eq!("completed".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Completed);
+            assert_eq!("failed".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Failed);
+            assert_eq!("cancelled".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Cancelled);
+            assert_eq!("canceled".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Cancelled);
+        }
+
+        #[test]
+        fn test_task_status_filter_invalid() {
+            let result = "invalid".parse::<TaskStatusFilter>();
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("Unknown status"));
+        }
+
+        #[test]
+        fn test_task_status_filter_to_task_status() {
+            assert!(matches!(TaskStatus::from(TaskStatusFilter::Pending), TaskStatus::Pending));
+            assert!(matches!(TaskStatus::from(TaskStatusFilter::Running), TaskStatus::Running));
+            assert!(matches!(TaskStatus::from(TaskStatusFilter::Completed), TaskStatus::Completed));
+            assert!(matches!(TaskStatus::from(TaskStatusFilter::Failed), TaskStatus::Failed));
+            assert!(matches!(TaskStatus::from(TaskStatusFilter::Cancelled), TaskStatus::Cancelled));
+        }
+
+        #[test]
+        fn test_inspect_format_from_str() {
+            assert_eq!("text".parse::<InspectFormat>().unwrap(), InspectFormat::Text);
+            assert_eq!("TEXT".parse::<InspectFormat>().unwrap(), InspectFormat::Text);
+            assert_eq!("json".parse::<InspectFormat>().unwrap(), InspectFormat::Json);
+            assert_eq!("mcp".parse::<InspectFormat>().unwrap(), InspectFormat::Mcp);
+        }
+
+        #[test]
+        fn test_inspect_format_invalid() {
+            let result = "xml".parse::<InspectFormat>();
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("Unknown format"));
+        }
+
+        #[test]
+        fn test_list_format_from_str() {
+            assert_eq!("table".parse::<ListFormat>().unwrap(), ListFormat::Table);
+            assert_eq!("TABLE".parse::<ListFormat>().unwrap(), ListFormat::Table);
+            assert_eq!("json".parse::<ListFormat>().unwrap(), ListFormat::Json);
+            assert_eq!("yaml".parse::<ListFormat>().unwrap(), ListFormat::Yaml);
+        }
+
+        #[test]
+        fn test_list_format_invalid() {
+            let result = "csv".parse::<ListFormat>();
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_list_format_default() {
+            assert_eq!(ListFormat::default(), ListFormat::Table);
+        }
+
+        #[test]
+        fn test_dev_transport_from_str() {
+            assert_eq!("stdio".parse::<DevTransport>().unwrap(), DevTransport::Stdio);
+            assert_eq!("STDIO".parse::<DevTransport>().unwrap(), DevTransport::Stdio);
+            assert_eq!("sse".parse::<DevTransport>().unwrap(), DevTransport::Sse);
+            assert_eq!("http".parse::<DevTransport>().unwrap(), DevTransport::Http);
+        }
+
+        #[test]
+        fn test_dev_transport_invalid() {
+            let result = "websocket".parse::<DevTransport>();
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("Unknown transport"));
+        }
+
+        #[test]
+        fn test_dev_transport_default() {
+            assert_eq!(DevTransport::default(), DevTransport::Stdio);
+        }
+
+        #[test]
+        fn test_install_target_from_str() {
+            assert_eq!("claude".parse::<InstallTarget>().unwrap(), InstallTarget::Claude);
+            assert_eq!("CLAUDE".parse::<InstallTarget>().unwrap(), InstallTarget::Claude);
+            assert_eq!("cursor".parse::<InstallTarget>().unwrap(), InstallTarget::Cursor);
+            assert_eq!("cline".parse::<InstallTarget>().unwrap(), InstallTarget::Cline);
+        }
+
+        #[test]
+        fn test_install_target_invalid() {
+            let result = "vscode".parse::<InstallTarget>();
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("Unknown target"));
+        }
+    }
+
+    // ============================================================================
+    // Helper Function Tests
+    // ============================================================================
+
+    mod helper_functions {
+        use super::*;
+
+        #[test]
+        fn test_format_task_status_pending() {
+            let result = format_task_status(TaskStatus::Pending);
+            assert!(result.contains("Pending"));
+        }
+
+        #[test]
+        fn test_format_task_status_running() {
+            let result = format_task_status(TaskStatus::Running);
+            assert!(result.contains("Running"));
+        }
+
+        #[test]
+        fn test_format_task_status_completed() {
+            let result = format_task_status(TaskStatus::Completed);
+            assert!(result.contains("Completed"));
+        }
+
+        #[test]
+        fn test_format_task_status_failed() {
+            let result = format_task_status(TaskStatus::Failed);
+            assert!(result.contains("Failed"));
+        }
+
+        #[test]
+        fn test_format_task_status_cancelled() {
+            let result = format_task_status(TaskStatus::Cancelled);
+            assert!(result.contains("Cancelled"));
+        }
+
+        #[test]
+        fn test_format_timestamp_rfc3339() {
+            let result = format_timestamp("2024-01-15T10:30:00Z");
+            assert_eq!(result, "2024-01-15 10:30:00");
+        }
+
+        #[test]
+        fn test_format_timestamp_with_timezone() {
+            let result = format_timestamp("2024-01-15T10:30:00+05:00");
+            assert_eq!(result, "2024-01-15 10:30:00");
+        }
+
+        #[test]
+        fn test_format_timestamp_invalid_passthrough() {
+            let result = format_timestamp("not-a-timestamp");
+            assert_eq!(result, "not-a-timestamp");
+        }
+
+        #[test]
+        fn test_generate_server_config() {
+            let (name, config) = generate_server_config(
+                "my-server",
+                "/path/to/server",
+                &["--config".to_string(), "config.json".to_string()],
+            );
+
+            assert_eq!(name, "my-server");
+            assert_eq!(config.command, "/path/to/server");
+            assert_eq!(config.args, vec!["--config", "config.json"]);
+            assert!(config.env.is_none());
+        }
+    }
+
+    // ============================================================================
+    // Data Structure Tests
+    // ============================================================================
+
+    mod data_structures {
+        use super::*;
+
+        #[test]
+        fn test_server_entry_serialization() {
+            let entry = ServerEntry {
+                name: "test-server".to_string(),
+                source: "Claude".to_string(),
+                command: "/path/to/server".to_string(),
+                args: vec!["--config".to_string(), "config.json".to_string()],
+                env: Some(HashMap::from([
+                    ("FOO".to_string(), "bar".to_string()),
+                ])),
+                enabled: true,
+            };
+
+            let json = serde_json::to_string(&entry).unwrap();
+            assert!(json.contains("test-server"));
+            assert!(json.contains("Claude"));
+            assert!(json.contains("FOO"));
+        }
+
+        #[test]
+        fn test_server_entry_without_env() {
+            let entry = ServerEntry {
+                name: "test".to_string(),
+                source: "Test".to_string(),
+                command: "cmd".to_string(),
+                args: vec![],
+                env: None,
+                enabled: false,
+            };
+
+            let json = serde_json::to_string(&entry).unwrap();
+            // env should be skipped when None due to skip_serializing_if
+            assert!(!json.contains("env"));
+        }
+
+        #[test]
+        fn test_list_output_serialization() {
+            let output = ListOutput {
+                servers: vec![
+                    ServerEntry {
+                        name: "server1".to_string(),
+                        source: "Claude".to_string(),
+                        command: "cmd1".to_string(),
+                        args: vec![],
+                        env: None,
+                        enabled: true,
+                    },
+                    ServerEntry {
+                        name: "server2".to_string(),
+                        source: "Cursor".to_string(),
+                        command: "cmd2".to_string(),
+                        args: vec!["arg1".to_string()],
+                        env: None,
+                        enabled: false,
+                    },
+                ],
+            };
+
+            let json = serde_json::to_string_pretty(&output).unwrap();
+            assert!(json.contains("server1"));
+            assert!(json.contains("server2"));
+            assert!(json.contains("Claude"));
+            assert!(json.contains("Cursor"));
+        }
+
+        #[test]
+        fn test_test_result_success() {
+            let result = TestResult {
+                name: "test_case".to_string(),
+                success: true,
+                duration_ms: 123.456,
+                details: Some("passed".to_string()),
+                error: None,
+            };
+
+            let json = serde_json::to_string(&result).unwrap();
+            assert!(json.contains("test_case"));
+            assert!(json.contains("true"));
+            assert!(json.contains("123.456"));
+            assert!(json.contains("passed"));
+            // error should be skipped when None
+            assert!(!json.contains("error"));
+        }
+
+        #[test]
+        fn test_test_result_failure() {
+            let result = TestResult {
+                name: "failing_test".to_string(),
+                success: false,
+                duration_ms: 50.0,
+                details: None,
+                error: Some("Connection refused".to_string()),
+            };
+
+            let json = serde_json::to_string(&result).unwrap();
+            assert!(json.contains("failing_test"));
+            assert!(json.contains("false"));
+            assert!(json.contains("Connection refused"));
+        }
+
+        #[test]
+        fn test_test_report_serialization() {
+            let report = TestReport {
+                server: "./my-server".to_string(),
+                success: true,
+                tests: vec![
+                    TestResult {
+                        name: "init".to_string(),
+                        success: true,
+                        duration_ms: 10.0,
+                        details: None,
+                        error: None,
+                    },
+                ],
+                total_duration_ms: 100.0,
+            };
+
+            let json = serde_json::to_string_pretty(&report).unwrap();
+            assert!(json.contains("my-server"));
+            assert!(json.contains("init"));
+            assert!(json.contains("total_duration_ms"));
+        }
+
+        #[test]
+        fn test_mcp_server_config_serialization() {
+            let config = McpServerConfig {
+                command: "node".to_string(),
+                args: vec!["server.js".to_string()],
+                env: Some(HashMap::from([
+                    ("NODE_ENV".to_string(), "production".to_string()),
+                ])),
+            };
+
+            let json = serde_json::to_string(&config).unwrap();
+            assert!(json.contains("node"));
+            assert!(json.contains("server.js"));
+            assert!(json.contains("NODE_ENV"));
+        }
+
+        #[test]
+        fn test_mcp_server_config_deserialization() {
+            let json = r#"{
+                "command": "python",
+                "args": ["-m", "my_server"],
+                "env": {"PYTHONPATH": "/custom/path"}
+            }"#;
+
+            let config: McpServerConfig = serde_json::from_str(json).unwrap();
+            assert_eq!(config.command, "python");
+            assert_eq!(config.args, vec!["-m", "my_server"]);
+            assert_eq!(
+                config.env.unwrap().get("PYTHONPATH"),
+                Some(&"/custom/path".to_string())
+            );
+        }
+
+        #[test]
+        fn test_mcp_server_config_minimal() {
+            let json = r#"{
+                "command": "server",
+                "args": []
+            }"#;
+
+            let config: McpServerConfig = serde_json::from_str(json).unwrap();
+            assert_eq!(config.command, "server");
+            assert!(config.args.is_empty());
+            assert!(config.env.is_none());
+        }
+    }
+
+    // ============================================================================
+    // Output Formatting Tests
+    // ============================================================================
+
+    mod output_formatting {
+        use super::*;
+
+        fn make_test_server_info() -> fastmcp_protocol::ServerInfo {
+            fastmcp_protocol::ServerInfo {
+                name: "test-server".to_string(),
+                version: "1.0.0".to_string(),
+            }
+        }
+
+        fn make_test_capabilities(tools: bool, resources: bool, prompts: bool) -> fastmcp_protocol::ServerCapabilities {
+            fastmcp_protocol::ServerCapabilities {
+                tools: if tools { Some(fastmcp_protocol::ToolsCapability { list_changed: false }) } else { None },
+                resources: if resources { Some(fastmcp_protocol::ResourcesCapability { subscribe: false, list_changed: false }) } else { None },
+                prompts: if prompts { Some(fastmcp_protocol::PromptsCapability { list_changed: false }) } else { None },
+                logging: None,
+                tasks: None,
+            }
+        }
+
+        fn make_test_tool(name: &str, description: Option<&str>) -> fastmcp_protocol::Tool {
+            fastmcp_protocol::Tool {
+                name: name.to_string(),
+                description: description.map(String::from),
+                input_schema: serde_json::json!({}),
+                output_schema: None,
+                icon: None,
+                version: None,
+                tags: vec![],
+                annotations: None,
+            }
+        }
+
+        fn make_test_resource(uri: &str, name: &str) -> fastmcp_protocol::Resource {
+            fastmcp_protocol::Resource {
+                uri: uri.to_string(),
+                name: name.to_string(),
+                description: None,
+                mime_type: None,
+                icon: None,
+                version: None,
+                tags: vec![],
+            }
+        }
+
+        fn make_test_prompt(name: &str, description: Option<&str>) -> fastmcp_protocol::Prompt {
+            fastmcp_protocol::Prompt {
+                name: name.to_string(),
+                description: description.map(String::from),
+                arguments: vec![],
+                icon: None,
+                version: None,
+                tags: vec![],
+            }
+        }
+
+        #[test]
+        fn test_format_inspect_text_basic() {
+            let server_info = make_test_server_info();
+            let capabilities = make_test_capabilities(true, true, true);
+
+            let output = format_inspect_text(
+                &server_info,
+                &capabilities,
+                &[],
+                &[],
+                &[],
+                &[],
+            );
+
+            assert!(output.contains("test-server"));
+            assert!(output.contains("v1.0.0"));
+            assert!(output.contains("tools=true"));
+            assert!(output.contains("resources=true"));
+            assert!(output.contains("prompts=true"));
+        }
+
+        #[test]
+        fn test_format_inspect_text_with_tools() {
+            let server_info = make_test_server_info();
+            let capabilities = make_test_capabilities(true, false, false);
+
+            let tools = vec![make_test_tool("my_tool", Some("A test tool"))];
+
+            let output = format_inspect_text(
+                &server_info,
+                &capabilities,
+                &tools,
+                &[],
+                &[],
+                &[],
+            );
+
+            assert!(output.contains("Tools (1)"));
+            assert!(output.contains("my_tool"));
+            assert!(output.contains("A test tool"));
+        }
+
+        #[test]
+        fn test_format_inspect_text_with_resources() {
+            let server_info = make_test_server_info();
+            let capabilities = make_test_capabilities(false, true, false);
+
+            let resources = vec![make_test_resource("file:///test.txt", "test file")];
+
+            let output = format_inspect_text(
+                &server_info,
+                &capabilities,
+                &[],
+                &resources,
+                &[],
+                &[],
+            );
+
+            assert!(output.contains("Resources (1)"));
+            assert!(output.contains("file:///test.txt"));
+            assert!(output.contains("test file"));
+        }
+
+        #[test]
+        fn test_format_inspect_text_with_prompts() {
+            let server_info = make_test_server_info();
+            let capabilities = make_test_capabilities(false, false, true);
+
+            let prompts = vec![make_test_prompt("greeting", Some("A greeting prompt"))];
+
+            let output = format_inspect_text(
+                &server_info,
+                &capabilities,
+                &[],
+                &[],
+                &[],
+                &prompts,
+            );
+
+            assert!(output.contains("Prompts (1)"));
+            assert!(output.contains("greeting"));
+            assert!(output.contains("A greeting prompt"));
+        }
+
+        #[test]
+        fn test_format_inspect_json_basic() {
+            let server_info = make_test_server_info();
+            let capabilities = make_test_capabilities(true, true, false);
+
+            let result = format_inspect_json(
+                &server_info,
+                &capabilities,
+                &[],
+                &[],
+                &[],
+                &[],
+            );
+
+            assert!(result.is_ok());
+            let json = result.unwrap();
+            assert!(json.contains("\"name\": \"test-server\""));
+            assert!(json.contains("\"version\": \"1.0.0\""));
+            assert!(json.contains("\"tools\": true"));
+            assert!(json.contains("\"resources\": true"));
+            assert!(json.contains("\"prompts\": false"));
+        }
+
+        #[test]
+        fn test_format_inspect_json_with_tools() {
+            let server_info = make_test_server_info();
+            let capabilities = make_test_capabilities(true, false, false);
+
+            let mut tool = make_test_tool("calculator", Some("Performs calculations"));
+            tool.input_schema = serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "expression": { "type": "string" }
+                }
+            });
+            let tools = vec![tool];
+
+            let result = format_inspect_json(
+                &server_info,
+                &capabilities,
+                &tools,
+                &[],
+                &[],
+                &[],
+            );
+
+            assert!(result.is_ok());
+            let json = result.unwrap();
+            assert!(json.contains("calculator"));
+            assert!(json.contains("Performs calculations"));
+        }
+    }
+
+    // ============================================================================
+    // Config Path Tests
+    // ============================================================================
+
+    mod config_paths {
+        use super::*;
+
+        #[test]
+        fn test_get_claude_desktop_config_path_format() {
+            // This test verifies the path format is correct
+            // We can't test the actual path without mocking HOME
+            let result = get_claude_desktop_config_path();
+            if let Ok(path) = result {
+                assert!(path.contains("claude_desktop_config.json"));
+            }
+            // If HOME is not set, result will be Err, which is also valid
+        }
+
+        #[test]
+        fn test_get_cursor_config_path_format() {
+            let result = get_cursor_config_path();
+            if let Ok(path) = result {
+                assert!(path.contains(".cursor"));
+                assert!(path.contains("mcp.json"));
+            }
+        }
+
+        #[test]
+        fn test_get_cline_config_path_format() {
+            let result = get_cline_config_path();
+            if let Ok(path) = result {
+                assert!(path.contains("settings.json"));
+            }
+        }
+    }
+
+    // ============================================================================
+    // Error Case Tests
+    // ============================================================================
+
+    mod error_cases {
+        use super::*;
+
+        #[test]
+        fn test_cli_missing_subcommand() {
+            let result = Cli::try_parse_from(["fastmcp"]);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_cli_invalid_subcommand() {
+            let result = Cli::try_parse_from(["fastmcp", "invalid"]);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_run_missing_server() {
+            let result = Cli::try_parse_from(["fastmcp", "run"]);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_inspect_invalid_format() {
+            let result = Cli::try_parse_from(["fastmcp", "inspect", "-f", "invalid", "./server"]);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_install_missing_name() {
+            let result = Cli::try_parse_from(["fastmcp", "install", "./server"]);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_tasks_missing_subcommand() {
+            let result = Cli::try_parse_from(["fastmcp", "tasks"]);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_tasks_show_missing_task_id() {
+            let result = Cli::try_parse_from(["fastmcp", "tasks", "show", "./server"]);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_dev_missing_target() {
+            let result = Cli::try_parse_from(["fastmcp", "dev"]);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_invalid_timeout_value() {
+            let result = Cli::try_parse_from(["fastmcp", "test", "--timeout", "not-a-number", "./server"]);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_invalid_port_value() {
+            let result = Cli::try_parse_from(["fastmcp", "dev", "--port", "not-a-number", "."]);
+            assert!(result.is_err());
+        }
+    }
+
+    // ============================================================================
+    // Integration-style Tests (without actual server)
+    // ============================================================================
+
+    mod integration {
+        use super::*;
+
+        #[test]
+        fn test_run_test_helper() {
+            // Test the run_test helper function with a successful closure
+            let result = run_test("test_success", || Ok("details".to_string()));
+
+            assert!(result.success);
+            assert_eq!(result.name, "test_success");
+            assert_eq!(result.details, Some("details".to_string()));
+            assert!(result.error.is_none());
+            assert!(result.duration_ms >= 0.0);
+        }
+
+        #[test]
+        fn test_run_test_helper_failure() {
+            // Test the run_test helper function with a failing closure
+            let result = run_test("test_failure", || {
+                Err(fastmcp_core::McpError::internal_error("test error"))
+            });
+
+            assert!(!result.success);
+            assert_eq!(result.name, "test_failure");
+            assert!(result.details.is_none());
+            assert!(result.error.is_some());
+            assert!(result.error.unwrap().contains("test error"));
+        }
+
+        #[test]
+        fn test_run_test_helper_empty_details() {
+            // Test that empty details are converted to None
+            let result = run_test("test_empty", || Ok(String::new()));
+
+            assert!(result.success);
+            assert!(result.details.is_none());
+        }
+    }
+}
