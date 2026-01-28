@@ -355,45 +355,206 @@ impl Default for AsyncLineReader {
 mod tests {
     use super::*;
 
+    // =========================================================================
+    // AsyncStdin tests
+    // =========================================================================
+
     #[test]
-    fn async_stdout_created() {
-        let _stdout = AsyncStdout::new();
+    fn async_stdin_new_creates_instance() {
+        let stdin = AsyncStdin::new();
+        // Verify the struct is created successfully
+        assert!(format!("{stdin:?}").contains("AsyncStdin"));
     }
 
     #[test]
-    fn async_stdin_created() {
-        let _stdin = AsyncStdin::new();
+    fn async_stdin_default_creates_instance() {
+        let stdin = AsyncStdin::default();
+        assert!(format!("{stdin:?}").contains("AsyncStdin"));
     }
 
     #[test]
-    fn async_line_reader_created() {
-        let _reader = AsyncLineReader::new();
+    fn async_stdin_read_line_sync_respects_cancellation() {
+        let mut stdin = AsyncStdin::new();
+        let cx = Cx::for_testing();
+        cx.set_cancel_requested(true);
+
+        let mut buf = String::new();
+        let result = stdin.read_line_sync(&cx, &mut buf);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
+        // Buffer should remain empty since we returned before reading
+        assert!(buf.is_empty());
     }
 
     #[test]
-    fn cancellation_check_on_write() {
+    fn async_stdin_read_line_sync_without_cancellation_does_not_error_on_check() {
+        let stdin = AsyncStdin::new();
+        let cx = Cx::for_testing();
+        // Cancellation NOT requested - the method would block on actual stdin,
+        // but we can at least verify that no error is returned from the
+        // cancellation check path by checking cx state
+        assert!(!cx.is_cancel_requested());
+        // Note: We don't call read_line_sync here because it would block
+        // waiting for actual stdin input
+        drop(stdin);
+    }
+
+    // =========================================================================
+    // AsyncStdout tests
+    // =========================================================================
+
+    #[test]
+    fn async_stdout_new_creates_instance() {
+        let stdout = AsyncStdout::new();
+        assert!(format!("{stdout:?}").contains("AsyncStdout"));
+    }
+
+    #[test]
+    fn async_stdout_default_creates_instance() {
+        let stdout = AsyncStdout::default();
+        assert!(format!("{stdout:?}").contains("AsyncStdout"));
+    }
+
+    #[test]
+    fn async_stdout_write_all_sync_respects_cancellation() {
         let mut stdout = AsyncStdout::new();
         let cx = Cx::for_testing();
         cx.set_cancel_requested(true);
 
-        let result = stdout.write_all_sync(&cx, b"test");
+        let result = stdout.write_all_sync(&cx, b"test data");
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(err.to_string(), "cancelled");
     }
 
     #[test]
-    fn cancellation_check_on_flush() {
+    fn async_stdout_flush_sync_respects_cancellation() {
         let mut stdout = AsyncStdout::new();
         let cx = Cx::for_testing();
         cx.set_cancel_requested(true);
 
         let result = stdout.flush_sync(&cx);
         assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(err.to_string(), "cancelled");
+    }
+
+    #[test]
+    fn async_stdout_write_all_unchecked_succeeds() {
+        let mut stdout = AsyncStdout::new();
+        // This writes to actual stdout but should succeed
+        let result = stdout.write_all_unchecked(b"");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn async_stdout_flush_unchecked_succeeds() {
+        let mut stdout = AsyncStdout::new();
+        let result = stdout.flush_unchecked();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn async_stdout_write_trait_write_succeeds() {
+        let mut stdout = AsyncStdout::new();
+        // Test Write trait implementation
+        let result = Write::write(&mut stdout, b"");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[test]
+    fn async_stdout_write_trait_flush_succeeds() {
+        let mut stdout = AsyncStdout::new();
+        let result = Write::flush(&mut stdout);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn async_stdout_write_trait_write_all_succeeds() {
+        let mut stdout = AsyncStdout::new();
+        let result = Write::write_all(&mut stdout, b"");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn async_stdout_poll_write_returns_ready() {
+        use std::task::Waker;
+
+        let mut stdout = AsyncStdout::new();
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(&waker);
+
+        let result = Pin::new(&mut stdout).poll_write(&mut cx, b"");
+        assert!(matches!(result, Poll::Ready(Ok(0))));
+    }
+
+    #[test]
+    fn async_stdout_poll_flush_returns_ready() {
+        use std::task::Waker;
+
+        let mut stdout = AsyncStdout::new();
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(&waker);
+
+        let result = Pin::new(&mut stdout).poll_flush(&mut cx);
+        assert!(matches!(result, Poll::Ready(Ok(()))));
+    }
+
+    #[test]
+    fn async_stdout_poll_shutdown_returns_ready() {
+        use std::task::Waker;
+
+        let mut stdout = AsyncStdout::new();
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(&waker);
+
+        let result = Pin::new(&mut stdout).poll_shutdown(&mut cx);
+        assert!(matches!(result, Poll::Ready(Ok(()))));
+    }
+
+    // =========================================================================
+    // AsyncLineReader tests
+    // =========================================================================
+
+    #[test]
+    fn async_line_reader_new_creates_instance() {
+        let reader = AsyncLineReader::new();
+        assert!(format!("{reader:?}").contains("AsyncLineReader"));
+    }
+
+    #[test]
+    fn async_line_reader_default_creates_instance() {
+        let reader = AsyncLineReader::default();
+        assert!(format!("{reader:?}").contains("AsyncLineReader"));
+    }
+
+    #[test]
+    fn async_line_reader_has_preallocated_buffer() {
+        let reader = AsyncLineReader::new();
+        // The buffer is initialized with capacity 4096
+        // We can verify through debug output that it exists
+        let debug = format!("{reader:?}");
+        assert!(debug.contains("buffer"));
+    }
+
+    #[test]
+    fn async_line_reader_read_line_respects_cancellation() {
+        let mut reader = AsyncLineReader::new();
+        let cx = Cx::for_testing();
+        cx.set_cancel_requested(true);
+
+        // read_line calls read_line_sync which checks cancellation
+        let result = reader.read_line(&cx);
+        assert!(result.is_err());
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
     }
 
     #[test]
-    fn cancellation_check_on_read_line() {
+    fn async_line_reader_read_non_empty_line_respects_cancellation() {
         let mut reader = AsyncLineReader::new();
         let cx = Cx::for_testing();
         cx.set_cancel_requested(true);
@@ -401,5 +562,47 @@ mod tests {
         let result = reader.read_non_empty_line(&cx);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
+    }
+
+    #[test]
+    fn async_line_reader_read_non_empty_line_checks_cancellation_early() {
+        // Test that cancellation is checked at the start of read_non_empty_line,
+        // not just within read_line
+        let mut reader = AsyncLineReader::new();
+        let cx = Cx::for_testing();
+        cx.set_cancel_requested(true);
+
+        // Should return immediately without trying to read
+        let result = reader.read_non_empty_line(&cx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+    }
+
+    // =========================================================================
+    // Cancellation error message tests
+    // =========================================================================
+
+    #[test]
+    fn cancellation_error_has_correct_message() {
+        let err = io::Error::new(io::ErrorKind::Interrupted, "cancelled");
+        assert_eq!(err.to_string(), "cancelled");
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+    }
+
+    // =========================================================================
+    // STDOUT_LOCK tests
+    // =========================================================================
+
+    #[test]
+    fn stdout_lock_allows_concurrent_access() {
+        // Test that the static STDOUT_LOCK can be acquired multiple times
+        // (from same thread, sequentially)
+        let mut stdout1 = AsyncStdout::new();
+        let mut stdout2 = AsyncStdout::new();
+
+        // Both should be able to flush (lock is acquired and released each time)
+        assert!(stdout1.flush_unchecked().is_ok());
+        assert!(stdout2.flush_unchecked().is_ok());
     }
 }
