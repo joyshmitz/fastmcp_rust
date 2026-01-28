@@ -1508,6 +1508,7 @@ mod tests {
             icon: None,
             version: None,
             tags: vec![],
+            annotations: None,
         };
         let json = serde_json::to_value(&tool).expect("serialize");
         assert!(json.get("version").is_none());
@@ -1520,6 +1521,7 @@ mod tests {
             icon: None,
             version: Some("1.2.3".to_string()),
             tags: vec![],
+            annotations: None,
         };
         let json = serde_json::to_value(&tool).expect("serialize");
         assert_eq!(json["version"], "1.2.3");
@@ -1667,6 +1669,7 @@ mod tests {
             icon: None,
             version: None,
             tags: vec![],
+            annotations: None,
         };
         let json = serde_json::to_value(&tool).expect("serialize");
         assert!(json.get("tags").is_none(), "Empty tags should not appear in JSON");
@@ -1679,6 +1682,7 @@ mod tests {
             icon: None,
             version: None,
             tags: vec!["api".to_string(), "database".to_string()],
+            annotations: None,
         };
         let json = serde_json::to_value(&tool).expect("serialize");
         assert_eq!(json["tags"], serde_json::json!(["api", "database"]));

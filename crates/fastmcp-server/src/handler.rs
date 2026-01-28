@@ -19,7 +19,7 @@ use fastmcp_core::{
 };
 use fastmcp_protocol::{
     Content, Icon, JsonRpcRequest, ProgressParams, ProgressToken, Prompt, PromptMessage, Resource,
-    ResourceContent, ResourceTemplate, Tool,
+    ResourceContent, ResourceTemplate, Tool, ToolAnnotations,
 };
 
 // ============================================================================
@@ -236,6 +236,15 @@ pub trait ToolHandler: Send + Sync {
     /// Note: Tags can also be set directly in `definition()`.
     fn tags(&self) -> &[String] {
         &[]
+    }
+
+    /// Returns the tool's annotations providing behavioral hints.
+    ///
+    /// Default implementation returns `None`. Override to provide annotations
+    /// like `destructive`, `idempotent`, `read_only`, or `open_world_hint`.
+    /// Note: Annotations can also be set directly in `definition()`.
+    fn annotations(&self) -> Option<&ToolAnnotations> {
+        None
     }
 
     /// Calls the tool synchronously with the given arguments.
@@ -491,6 +500,10 @@ impl ToolHandler for MountedToolHandler {
 
     fn tags(&self) -> &[String] {
         self.inner.tags()
+    }
+
+    fn annotations(&self) -> Option<&ToolAnnotations> {
+        self.inner.annotations()
     }
 
     fn call(&self, ctx: &McpContext, arguments: serde_json::Value) -> McpResult<Vec<Content>> {

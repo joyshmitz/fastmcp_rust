@@ -827,6 +827,9 @@ mod tests {
                     "required": ["expression"]
                 }),
                 icon: None,
+                version: None,
+                tags: vec![],
+                annotations: None,
             },
             Tool {
                 name: "search".to_string(),
@@ -842,6 +845,9 @@ mod tests {
                     "required": ["pattern"]
                 }),
                 icon: None,
+                version: None,
+                tags: vec![],
+                annotations: None,
             },
         ]
     }
@@ -854,6 +860,8 @@ mod tests {
                 description: Some("Application configuration".to_string()),
                 mime_type: Some("application/json".to_string()),
                 icon: None,
+                version: None,
+                tags: vec![],
             },
             Resource {
                 uri: "file://data.csv".to_string(),
@@ -861,6 +869,8 @@ mod tests {
                 description: Some("Data file".to_string()),
                 mime_type: Some("text/csv".to_string()),
                 icon: None,
+                version: None,
+                tags: vec![],
             },
         ]
     }
@@ -876,6 +886,8 @@ mod tests {
                     required: true,
                 }],
                 icon: None,
+                version: None,
+                tags: vec![],
             },
             Prompt {
                 name: "summarize".to_string(),
@@ -893,6 +905,8 @@ mod tests {
                     },
                 ],
                 icon: None,
+                version: None,
+                tags: vec![],
             },
         ]
     }
@@ -1073,6 +1087,8 @@ mod tests {
                 description: Some("Read file contents".to_string()),
                 mime_type: None,
                 icon: None,
+                version: None,
+                tags: vec![],
             },
             Resource {
                 uri: "file://config.json".to_string(),
@@ -1080,6 +1096,8 @@ mod tests {
                 description: Some("Application config".to_string()),
                 mime_type: Some("application/json".to_string()),
                 icon: None,
+                version: None,
+                tags: vec![],
             },
             Resource {
                 uri: "db://users/{id}".to_string(),
@@ -1087,6 +1105,8 @@ mod tests {
                 description: Some("User record by ID".to_string()),
                 mime_type: None,
                 icon: None,
+                version: None,
+                tags: vec![],
             },
             Resource {
                 uri: "cache://stats".to_string(),
@@ -1094,6 +1114,8 @@ mod tests {
                 description: Some("Cached statistics".to_string()),
                 mime_type: None,
                 icon: None,
+                version: None,
+                tags: vec![],
             },
         ]
     }

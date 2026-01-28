@@ -281,6 +281,75 @@ impl Icon {
 // Component Definitions
 // ============================================================================
 
+/// Tool annotations for additional metadata.
+///
+/// These annotations provide hints about tool behavior to help clients
+/// make informed decisions about tool usage.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolAnnotations {
+    /// Whether the tool may cause destructive side effects.
+    /// True means the tool modifies external state (e.g., deleting files).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destructive: Option<bool>,
+    /// Whether the tool is idempotent (safe to retry without side effects).
+    /// True means calling the tool multiple times has the same effect as calling it once.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idempotent: Option<bool>,
+    /// Whether the tool is read-only (has no side effects).
+    /// True means the tool only reads data without modifying anything.
+    #[serde(rename = "readOnly", skip_serializing_if = "Option::is_none")]
+    pub read_only: Option<bool>,
+    /// Hint about the tool's behavior with unknown inputs.
+    /// Can be used to indicate how the tool handles inputs not explicitly defined.
+    #[serde(rename = "openWorldHint", skip_serializing_if = "Option::is_none")]
+    pub open_world_hint: Option<String>,
+}
+
+impl ToolAnnotations {
+    /// Creates a new empty annotations struct.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the destructive annotation.
+    #[must_use]
+    pub fn destructive(mut self, value: bool) -> Self {
+        self.destructive = Some(value);
+        self
+    }
+
+    /// Sets the idempotent annotation.
+    #[must_use]
+    pub fn idempotent(mut self, value: bool) -> Self {
+        self.idempotent = Some(value);
+        self
+    }
+
+    /// Sets the read_only annotation.
+    #[must_use]
+    pub fn read_only(mut self, value: bool) -> Self {
+        self.read_only = Some(value);
+        self
+    }
+
+    /// Sets the open_world_hint annotation.
+    #[must_use]
+    pub fn open_world_hint(mut self, hint: impl Into<String>) -> Self {
+        self.open_world_hint = Some(hint.into());
+        self
+    }
+
+    /// Returns true if any annotation is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.destructive.is_none()
+            && self.idempotent.is_none()
+            && self.read_only.is_none()
+            && self.open_world_hint.is_none()
+    }
+}
+
 /// Tool definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tool {
@@ -301,6 +370,9 @@ pub struct Tool {
     /// Tags for filtering and organization.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Tool annotations providing behavioral hints.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<ToolAnnotations>,
 }
 
 /// Resource definition.
