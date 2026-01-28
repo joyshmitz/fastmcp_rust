@@ -37,14 +37,16 @@ use std::time::{Duration, Instant};
 use asupersync::Cx;
 use fastmcp_core::{McpError, McpResult};
 use fastmcp_protocol::{
-    CallToolParams, CallToolResult, CancelledParams, ClientCapabilities, ClientInfo, Content,
-    GetPromptParams, GetPromptResult, InitializeParams, InitializeResult, JsonRpcMessage,
-    JsonRpcRequest, JsonRpcResponse, ListPromptsParams, ListPromptsResult,
-    ListResourceTemplatesParams, ListResourceTemplatesResult, ListResourcesParams,
-    ListResourcesResult, ListToolsParams, ListToolsResult, LogLevel, LogMessageParams,
+    CallToolParams, CallToolResult, CancelTaskParams, CancelTaskResult, CancelledParams,
+    ClientCapabilities, ClientInfo, Content, GetPromptParams, GetPromptResult, GetTaskParams,
+    GetTaskResult, InitializeParams, InitializeResult, JsonRpcMessage, JsonRpcRequest,
+    JsonRpcResponse, ListPromptsParams, ListPromptsResult, ListResourceTemplatesParams,
+    ListResourceTemplatesResult, ListResourcesParams, ListResourcesResult, ListTasksParams,
+    ListTasksResult, ListToolsParams, ListToolsResult, LogLevel, LogMessageParams,
     PROTOCOL_VERSION, ProgressToken as ProgressMarker, Prompt, PromptMessage, ReadResourceParams,
     ReadResourceResult, RequestId, RequestMeta, Resource, ResourceContent, ResourceTemplate,
-    ServerCapabilities, ServerInfo, SetLogLevelParams, Tool,
+    ServerCapabilities, ServerInfo, SetLogLevelParams, SubmitTaskParams, SubmitTaskResult, TaskId,
+    TaskInfo, TaskResult, TaskStatus, Tool,
 };
 
 /// Callback for receiving progress notifications during tool execution.
@@ -678,6 +680,200 @@ impl Client {
         };
         let result: GetPromptResult = self.send_request("prompts/get", params)?;
         Ok(result.messages)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Task Management (Docket/SEP-1686)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Submits a background task for execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_type` - The type of task to execute (e.g., "data_export", "batch_process")
+    /// * `input` - Task parameters as JSON
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the server doesn't support tasks or the request fails.
+    pub fn submit_task(
+        &mut self,
+        task_type: &str,
+        input: serde_json::Value,
+    ) -> McpResult<TaskInfo> {
+        let params = SubmitTaskParams {
+            task_type: task_type.to_string(),
+            params: Some(input),
+        };
+        let result: SubmitTaskResult = self.send_request("tasks/submit", params)?;
+        Ok(result.task)
+    }
+
+    /// Lists tasks with optional status filter.
+    ///
+    /// # Arguments
+    ///
+    /// * `status` - Optional filter by task status
+    /// * `cursor` - Optional pagination cursor from previous response
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the server doesn't support tasks or the request fails.
+    pub fn list_tasks(
+        &mut self,
+        status: Option<TaskStatus>,
+        cursor: Option<&str>,
+    ) -> McpResult<ListTasksResult> {
+        let params = ListTasksParams {
+            cursor: cursor.map(ToString::to_string),
+            status,
+        };
+        self.send_request("tasks/list", params)
+    }
+
+    /// Gets detailed information about a specific task.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to retrieve
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the task is not found or the request fails.
+    pub fn get_task(&mut self, task_id: &str) -> McpResult<GetTaskResult> {
+        let params = GetTaskParams {
+            id: TaskId::from_string(task_id),
+        };
+        self.send_request("tasks/get", params)
+    }
+
+    /// Cancels a running or pending task.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to cancel
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the task cannot be cancelled or is already complete.
+    pub fn cancel_task(&mut self, task_id: &str) -> McpResult<TaskInfo> {
+        self.cancel_task_with_reason(task_id, None)
+    }
+
+    /// Cancels a running or pending task with an optional reason.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to cancel
+    /// * `reason` - Optional reason for the cancellation
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the task cannot be cancelled or is already complete.
+    pub fn cancel_task_with_reason(
+        &mut self,
+        task_id: &str,
+        reason: Option<&str>,
+    ) -> McpResult<TaskInfo> {
+        let params = CancelTaskParams {
+            id: TaskId::from_string(task_id),
+            reason: reason.map(ToString::to_string),
+        };
+        let result: CancelTaskResult = self.send_request("tasks/cancel", params)?;
+        Ok(result.task)
+    }
+
+    /// Waits for a task to complete by polling.
+    ///
+    /// This method polls the server at the specified interval until the task
+    /// reaches a terminal state (completed, failed, or cancelled).
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to wait for
+    /// * `poll_interval` - Duration between poll requests
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the task fails, is cancelled, or the request fails.
+    pub fn wait_for_task(
+        &mut self,
+        task_id: &str,
+        poll_interval: Duration,
+    ) -> McpResult<TaskResult> {
+        loop {
+            let result = self.get_task(task_id)?;
+
+            // Check if task is complete
+            if result.task.status.is_terminal() {
+                // If task has a result, return it
+                if let Some(task_result) = result.result {
+                    return Ok(task_result);
+                }
+
+                // Task is terminal but no result - create one from the task info
+                return Ok(TaskResult {
+                    id: result.task.id,
+                    success: result.task.status == TaskStatus::Completed,
+                    data: None,
+                    error: result.task.error,
+                });
+            }
+
+            // Sleep before next poll
+            std::thread::sleep(poll_interval);
+        }
+    }
+
+    /// Waits for a task with progress callback.
+    ///
+    /// Similar to `wait_for_task` but also provides progress information via callback.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to wait for
+    /// * `poll_interval` - Duration between poll requests
+    /// * `on_progress` - Callback invoked with progress updates
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the task fails, is cancelled, or the request fails.
+    pub fn wait_for_task_with_progress<F>(
+        &mut self,
+        task_id: &str,
+        poll_interval: Duration,
+        mut on_progress: F,
+    ) -> McpResult<TaskResult>
+    where
+        F: FnMut(f64, Option<&str>),
+    {
+        loop {
+            let result = self.get_task(task_id)?;
+
+            // Report progress if available
+            if let Some(progress) = result.task.progress {
+                on_progress(progress, result.task.message.as_deref());
+            }
+
+            // Check if task is complete
+            if result.task.status.is_terminal() {
+                // If task has a result, return it
+                if let Some(task_result) = result.result {
+                    return Ok(task_result);
+                }
+
+                // Task is terminal but no result - create one from the task info
+                return Ok(TaskResult {
+                    id: result.task.id,
+                    success: result.task.status == TaskStatus::Completed,
+                    data: None,
+                    error: result.task.error,
+                });
+            }
+
+            // Sleep before next poll
+            std::thread::sleep(poll_interval);
+        }
     }
 
     /// Closes the client connection.
