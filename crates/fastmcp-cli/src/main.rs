@@ -386,7 +386,9 @@ impl std::str::FromStr for DevTransport {
             "stdio" => Ok(Self::Stdio),
             "sse" => Ok(Self::Sse),
             "http" => Ok(Self::Http),
-            _ => Err(format!("Unknown transport: {s}. Expected: stdio, sse, http")),
+            _ => Err(format!(
+                "Unknown transport: {s}. Expected: stdio, sse, http"
+            )),
         }
     }
 }
@@ -626,7 +628,11 @@ fn cmd_list(
             }
 
             for entry in &servers {
-                let status = if entry.enabled { "✓ enabled" } else { "✗ disabled" };
+                let status = if entry.enabled {
+                    "✓ enabled"
+                } else {
+                    "✗ disabled"
+                };
 
                 if verbose {
                     let args = if entry.args.is_empty() {
@@ -732,7 +738,11 @@ fn load_servers_from_client_config(
 }
 
 /// Load servers from a custom config path.
-fn load_servers_from_path(path: &PathBuf, source_name: &str, servers: &mut Vec<ServerEntry>) -> McpResult<()> {
+fn load_servers_from_path(
+    path: &PathBuf,
+    source_name: &str,
+    servers: &mut Vec<ServerEntry>,
+) -> McpResult<()> {
     let content = std::fs::read_to_string(path).map_err(|e| {
         fastmcp_core::McpError::internal_error(format!("Failed to read config: {e}"))
     })?;
@@ -803,7 +813,8 @@ fn load_servers_from_path(path: &PathBuf, source_name: &str, servers: &mut Vec<S
 
             if let Some(map) = servers_map {
                 for (name, config) in map {
-                    if let Ok(mcp_config) = serde_json::from_value::<McpServerConfig>(config.clone())
+                    if let Ok(mcp_config) =
+                        serde_json::from_value::<McpServerConfig>(config.clone())
                     {
                         let enabled = !config
                             .get("disabled")
@@ -1042,7 +1053,7 @@ struct DevConfig {
 
 /// Dev command: Run server in development mode with hot reloading.
 fn cmd_dev(config: DevConfig) -> McpResult<()> {
-    use console::{style, Term};
+    use console::{Term, style};
     use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
@@ -1072,14 +1083,19 @@ fn cmd_dev(config: DevConfig) -> McpResult<()> {
         style("▶").green().bold(),
         style("fastmcp").cyan().bold()
     );
-    println!(
-        "  Target: {}",
-        style(target_path.display()).yellow()
-    );
+    println!("  Target: {}", style(target_path.display()).yellow());
     if !config.no_reload {
         println!(
             "  Watching: {}",
-            style(config.reload_dirs.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")).dim()
+            style(
+                config
+                    .reload_dirs
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .dim()
         );
     }
     println!();
@@ -1091,10 +1107,7 @@ fn cmd_dev(config: DevConfig) -> McpResult<()> {
     // Function to build the project
     let build_project = |verbose: bool| -> bool {
         if is_cargo_project {
-            println!(
-                "{} Building...",
-                style("🔨").bold()
-            );
+            println!("{} Building...", style("🔨").bold());
             let output = Command::new("cargo")
                 .arg("build")
                 .current_dir(&target_path)
@@ -1104,16 +1117,10 @@ fn cmd_dev(config: DevConfig) -> McpResult<()> {
             match output {
                 Ok(output) => {
                     if output.status.success() {
-                        println!(
-                            "{} Build successful",
-                            style("✓").green().bold()
-                        );
+                        println!("{} Build successful", style("✓").green().bold());
                         true
                     } else {
-                        println!(
-                            "{} Build failed",
-                            style("✗").red().bold()
-                        );
+                        println!("{} Build failed", style("✗").red().bold());
                         if verbose {
                             let stderr = String::from_utf8_lossy(&output.stderr);
                             for line in stderr.lines().take(20) {
@@ -1124,11 +1131,7 @@ fn cmd_dev(config: DevConfig) -> McpResult<()> {
                     }
                 }
                 Err(e) => {
-                    println!(
-                        "{} Build error: {}",
-                        style("✗").red().bold(),
-                        e
-                    );
+                    println!("{} Build error: {}", style("✗").red().bold(), e);
                     false
                 }
             }
@@ -1146,10 +1149,7 @@ fn cmd_dev(config: DevConfig) -> McpResult<()> {
             (config.target.clone(), vec![])
         };
 
-        println!(
-            "{} Starting server...",
-            style("🚀").bold()
-        );
+        println!("{} Starting server...", style("🚀").bold());
 
         let mut command = Command::new(&cmd);
         command
@@ -1170,11 +1170,7 @@ fn cmd_dev(config: DevConfig) -> McpResult<()> {
                 Some(child)
             }
             Err(e) => {
-                println!(
-                    "{} Failed to start server: {}",
-                    style("✗").red().bold(),
-                    e
-                );
+                println!("{} Failed to start server: {}", style("✗").red().bold(), e);
                 None
             }
         }
@@ -1219,7 +1215,9 @@ fn cmd_dev(config: DevConfig) -> McpResult<()> {
         },
         NotifyConfig::default().with_poll_interval(Duration::from_millis(100)),
     )
-    .map_err(|e| fastmcp_core::McpError::internal_error(format!("Failed to create watcher: {e}")))?;
+    .map_err(|e| {
+        fastmcp_core::McpError::internal_error(format!("Failed to create watcher: {e}"))
+    })?;
 
     // Watch directories
     for dir in &config.reload_dirs {
@@ -1259,10 +1257,7 @@ fn cmd_dev(config: DevConfig) -> McpResult<()> {
                         let _ = term.clear_screen();
                     }
 
-                    println!(
-                        "\n{} Change detected, rebuilding...",
-                        style("🔄").bold()
-                    );
+                    println!("\n{} Change detected, rebuilding...", style("🔄").bold());
 
                     // Kill existing process
                     if let Some(mut c) = child.take() {
@@ -1276,10 +1271,7 @@ fn cmd_dev(config: DevConfig) -> McpResult<()> {
                     }
 
                     last_rebuild = Instant::now();
-                    println!(
-                        "\n{} Watching for changes...\n",
-                        style("👀").bold()
-                    );
+                    println!("\n{} Watching for changes...\n", style("👀").bold());
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -1288,10 +1280,7 @@ fn cmd_dev(config: DevConfig) -> McpResult<()> {
                     match c.try_wait() {
                         Ok(Some(status)) => {
                             if status.success() {
-                                println!(
-                                    "\n{} Server exited normally",
-                                    style("ℹ").blue().bold()
-                                );
+                                println!("\n{} Server exited normally", style("ℹ").blue().bold());
                             } else {
                                 println!(
                                     "\n{} Server exited with error ({})",
@@ -1299,10 +1288,7 @@ fn cmd_dev(config: DevConfig) -> McpResult<()> {
                                     status
                                 );
                             }
-                            println!(
-                                "{} Waiting for changes...\n",
-                                style("👀").bold()
-                            );
+                            println!("{} Waiting for changes...\n", style("👀").bold());
                             child = None;
                         }
                         Ok(None) => {
@@ -2103,7 +2089,12 @@ mod tests {
         fn test_run_command_basic() {
             let cli = Cli::try_parse_from(["fastmcp", "run", "./my-server"]).unwrap();
             match cli.command {
-                Commands::Run { server, args, cwd, env } => {
+                Commands::Run {
+                    server,
+                    args,
+                    cwd,
+                    env,
+                } => {
                     assert_eq!(server, "./my-server");
                     assert!(args.is_empty());
                     assert!(cwd.is_none());
@@ -2116,8 +2107,14 @@ mod tests {
         #[test]
         fn test_run_command_with_args() {
             let cli = Cli::try_parse_from([
-                "fastmcp", "run", "./my-server", "--", "--config", "config.json"
-            ]).unwrap();
+                "fastmcp",
+                "run",
+                "./my-server",
+                "--",
+                "--config",
+                "config.json",
+            ])
+            .unwrap();
             match cli.command {
                 Commands::Run { server, args, .. } => {
                     assert_eq!(server, "./my-server");
@@ -2129,9 +2126,8 @@ mod tests {
 
         #[test]
         fn test_run_command_with_cwd() {
-            let cli = Cli::try_parse_from([
-                "fastmcp", "run", "-C", "/tmp/workdir", "./my-server"
-            ]).unwrap();
+            let cli = Cli::try_parse_from(["fastmcp", "run", "-C", "/tmp/workdir", "./my-server"])
+                .unwrap();
             match cli.command {
                 Commands::Run { cwd, .. } => {
                     assert_eq!(cwd, Some(PathBuf::from("/tmp/workdir")));
@@ -2143,8 +2139,9 @@ mod tests {
         #[test]
         fn test_run_command_with_env() {
             let cli = Cli::try_parse_from([
-                "fastmcp", "run", "-e", "FOO=bar", "-e", "BAZ=qux", "./server"
-            ]).unwrap();
+                "fastmcp", "run", "-e", "FOO=bar", "-e", "BAZ=qux", "./server",
+            ])
+            .unwrap();
             match cli.command {
                 Commands::Run { env, .. } => {
                     assert_eq!(env, vec!["FOO=bar", "BAZ=qux"]);
@@ -2157,7 +2154,12 @@ mod tests {
         fn test_inspect_command_basic() {
             let cli = Cli::try_parse_from(["fastmcp", "inspect", "./server"]).unwrap();
             match cli.command {
-                Commands::Inspect { server, format, output, .. } => {
+                Commands::Inspect {
+                    server,
+                    format,
+                    output,
+                    ..
+                } => {
                     assert_eq!(server, "./server");
                     assert_eq!(format, InspectFormat::Text);
                     assert!(output.is_none());
@@ -2168,9 +2170,8 @@ mod tests {
 
         #[test]
         fn test_inspect_command_json_format() {
-            let cli = Cli::try_parse_from([
-                "fastmcp", "inspect", "-f", "json", "./server"
-            ]).unwrap();
+            let cli =
+                Cli::try_parse_from(["fastmcp", "inspect", "-f", "json", "./server"]).unwrap();
             match cli.command {
                 Commands::Inspect { format, .. } => {
                     assert_eq!(format, InspectFormat::Json);
@@ -2181,9 +2182,8 @@ mod tests {
 
         #[test]
         fn test_inspect_command_mcp_format() {
-            let cli = Cli::try_parse_from([
-                "fastmcp", "inspect", "--format", "mcp", "./server"
-            ]).unwrap();
+            let cli =
+                Cli::try_parse_from(["fastmcp", "inspect", "--format", "mcp", "./server"]).unwrap();
             match cli.command {
                 Commands::Inspect { format, .. } => {
                     assert_eq!(format, InspectFormat::Mcp);
@@ -2194,9 +2194,8 @@ mod tests {
 
         #[test]
         fn test_inspect_command_with_output() {
-            let cli = Cli::try_parse_from([
-                "fastmcp", "inspect", "-o", "output.json", "./server"
-            ]).unwrap();
+            let cli = Cli::try_parse_from(["fastmcp", "inspect", "-o", "output.json", "./server"])
+                .unwrap();
             match cli.command {
                 Commands::Inspect { output, .. } => {
                     assert_eq!(output, Some(PathBuf::from("output.json")));
@@ -2207,11 +2206,15 @@ mod tests {
 
         #[test]
         fn test_install_command_basic() {
-            let cli = Cli::try_parse_from([
-                "fastmcp", "install", "my-server", "./server"
-            ]).unwrap();
+            let cli = Cli::try_parse_from(["fastmcp", "install", "my-server", "./server"]).unwrap();
             match cli.command {
-                Commands::Install { name, server, target, dry_run, .. } => {
+                Commands::Install {
+                    name,
+                    server,
+                    target,
+                    dry_run,
+                    ..
+                } => {
                     assert_eq!(name, "my-server");
                     assert_eq!(server, "./server");
                     assert_eq!(target, InstallTarget::Claude);
@@ -2224,8 +2227,14 @@ mod tests {
         #[test]
         fn test_install_command_with_target() {
             let cli = Cli::try_parse_from([
-                "fastmcp", "install", "-t", "cursor", "my-server", "./server"
-            ]).unwrap();
+                "fastmcp",
+                "install",
+                "-t",
+                "cursor",
+                "my-server",
+                "./server",
+            ])
+            .unwrap();
             match cli.command {
                 Commands::Install { target, .. } => {
                     assert_eq!(target, InstallTarget::Cursor);
@@ -2236,9 +2245,9 @@ mod tests {
 
         #[test]
         fn test_install_command_dry_run() {
-            let cli = Cli::try_parse_from([
-                "fastmcp", "install", "--dry-run", "my-server", "./server"
-            ]).unwrap();
+            let cli =
+                Cli::try_parse_from(["fastmcp", "install", "--dry-run", "my-server", "./server"])
+                    .unwrap();
             match cli.command {
                 Commands::Install { dry_run, .. } => {
                     assert!(dry_run);
@@ -2251,7 +2260,12 @@ mod tests {
         fn test_list_command_default() {
             let cli = Cli::try_parse_from(["fastmcp", "list"]).unwrap();
             match cli.command {
-                Commands::List { target, config, format, verbose } => {
+                Commands::List {
+                    target,
+                    config,
+                    format,
+                    verbose,
+                } => {
                     assert!(target.is_none());
                     assert!(config.is_none());
                     assert_eq!(format, ListFormat::Table);
@@ -2263,11 +2277,15 @@ mod tests {
 
         #[test]
         fn test_list_command_with_options() {
-            let cli = Cli::try_parse_from([
-                "fastmcp", "list", "-t", "cline", "-f", "json", "-v"
-            ]).unwrap();
+            let cli = Cli::try_parse_from(["fastmcp", "list", "-t", "cline", "-f", "json", "-v"])
+                .unwrap();
             match cli.command {
-                Commands::List { target, format, verbose, .. } => {
+                Commands::List {
+                    target,
+                    format,
+                    verbose,
+                    ..
+                } => {
                     assert_eq!(target, Some(InstallTarget::Cline));
                     assert_eq!(format, ListFormat::Json);
                     assert!(verbose);
@@ -2278,9 +2296,7 @@ mod tests {
 
         #[test]
         fn test_list_command_yaml_format() {
-            let cli = Cli::try_parse_from([
-                "fastmcp", "list", "--format", "yaml"
-            ]).unwrap();
+            let cli = Cli::try_parse_from(["fastmcp", "list", "--format", "yaml"]).unwrap();
             match cli.command {
                 Commands::List { format, .. } => {
                     assert_eq!(format, ListFormat::Yaml);
@@ -2293,7 +2309,13 @@ mod tests {
         fn test_test_command_default() {
             let cli = Cli::try_parse_from(["fastmcp", "test", "./server"]).unwrap();
             match cli.command {
-                Commands::Test { server, timeout, verbose, json, .. } => {
+                Commands::Test {
+                    server,
+                    timeout,
+                    verbose,
+                    json,
+                    ..
+                } => {
                     assert_eq!(server, "./server");
                     assert_eq!(timeout, 30);
                     assert!(!verbose);
@@ -2306,10 +2328,22 @@ mod tests {
         #[test]
         fn test_test_command_with_options() {
             let cli = Cli::try_parse_from([
-                "fastmcp", "test", "--timeout", "60", "-v", "--json", "./server"
-            ]).unwrap();
+                "fastmcp",
+                "test",
+                "--timeout",
+                "60",
+                "-v",
+                "--json",
+                "./server",
+            ])
+            .unwrap();
             match cli.command {
-                Commands::Test { timeout, verbose, json, .. } => {
+                Commands::Test {
+                    timeout,
+                    verbose,
+                    json,
+                    ..
+                } => {
                     assert_eq!(timeout, 60);
                     assert!(verbose);
                     assert!(json);
@@ -2323,7 +2357,15 @@ mod tests {
             let cli = Cli::try_parse_from(["fastmcp", "dev", "."]).unwrap();
             match cli.command {
                 Commands::Dev {
-                    target, host, port, no_reload, transport, debounce, clear, verbose, ..
+                    target,
+                    host,
+                    port,
+                    no_reload,
+                    transport,
+                    debounce,
+                    clear,
+                    verbose,
+                    ..
                 } => {
                     assert_eq!(target, ".");
                     assert_eq!(host, "localhost");
@@ -2341,18 +2383,29 @@ mod tests {
         #[test]
         fn test_dev_command_with_options() {
             let cli = Cli::try_parse_from([
-                "fastmcp", "dev",
-                "--host", "0.0.0.0",
-                "--port", "3000",
-                "--transport", "sse",
+                "fastmcp",
+                "dev",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "3000",
+                "--transport",
+                "sse",
                 "--no-reload",
                 "--clear",
                 "-v",
-                "."
-            ]).unwrap();
+                ".",
+            ])
+            .unwrap();
             match cli.command {
                 Commands::Dev {
-                    host, port, transport, no_reload, clear, verbose, ..
+                    host,
+                    port,
+                    transport,
+                    no_reload,
+                    clear,
+                    verbose,
+                    ..
                 } => {
                     assert_eq!(host, "0.0.0.0");
                     assert_eq!(port, 3000);
@@ -2367,9 +2420,7 @@ mod tests {
 
         #[test]
         fn test_dev_command_http_transport() {
-            let cli = Cli::try_parse_from([
-                "fastmcp", "dev", "--transport", "http", "."
-            ]).unwrap();
+            let cli = Cli::try_parse_from(["fastmcp", "dev", "--transport", "http", "."]).unwrap();
             match cli.command {
                 Commands::Dev { transport, .. } => {
                     assert_eq!(transport, DevTransport::Http);
@@ -2380,11 +2431,18 @@ mod tests {
 
         #[test]
         fn test_tasks_list_command() {
-            let cli = Cli::try_parse_from([
-                "fastmcp", "tasks", "list", "./server"
-            ]).unwrap();
+            let cli = Cli::try_parse_from(["fastmcp", "tasks", "list", "./server"]).unwrap();
             match cli.command {
-                Commands::Tasks { action: TasksAction::List { server, status, limit, json, .. } } => {
+                Commands::Tasks {
+                    action:
+                        TasksAction::List {
+                            server,
+                            status,
+                            limit,
+                            json,
+                            ..
+                        },
+                } => {
                     assert_eq!(server, "./server");
                     assert!(status.is_none());
                     assert_eq!(limit, 20);
@@ -2397,10 +2455,19 @@ mod tests {
         #[test]
         fn test_tasks_list_with_status_filter() {
             let cli = Cli::try_parse_from([
-                "fastmcp", "tasks", "list", "-s", "running", "-n", "50", "--json", "./server"
-            ]).unwrap();
+                "fastmcp", "tasks", "list", "-s", "running", "-n", "50", "--json", "./server",
+            ])
+            .unwrap();
             match cli.command {
-                Commands::Tasks { action: TasksAction::List { status, limit, json, .. } } => {
+                Commands::Tasks {
+                    action:
+                        TasksAction::List {
+                            status,
+                            limit,
+                            json,
+                            ..
+                        },
+                } => {
                     assert_eq!(status, Some(TaskStatusFilter::Running));
                     assert_eq!(limit, 50);
                     assert!(json);
@@ -2411,11 +2478,18 @@ mod tests {
 
         #[test]
         fn test_tasks_show_command() {
-            let cli = Cli::try_parse_from([
-                "fastmcp", "tasks", "show", "./server", "task-001"
-            ]).unwrap();
+            let cli =
+                Cli::try_parse_from(["fastmcp", "tasks", "show", "./server", "task-001"]).unwrap();
             match cli.command {
-                Commands::Tasks { action: TasksAction::Show { server, task_id, json, .. } } => {
+                Commands::Tasks {
+                    action:
+                        TasksAction::Show {
+                            server,
+                            task_id,
+                            json,
+                            ..
+                        },
+                } => {
                     assert_eq!(server, "./server");
                     assert_eq!(task_id, "task-001");
                     assert!(!json);
@@ -2427,10 +2501,25 @@ mod tests {
         #[test]
         fn test_tasks_cancel_command() {
             let cli = Cli::try_parse_from([
-                "fastmcp", "tasks", "cancel", "-r", "no longer needed", "./server", "task-001"
-            ]).unwrap();
+                "fastmcp",
+                "tasks",
+                "cancel",
+                "-r",
+                "no longer needed",
+                "./server",
+                "task-001",
+            ])
+            .unwrap();
             match cli.command {
-                Commands::Tasks { action: TasksAction::Cancel { server, task_id, reason, .. } } => {
+                Commands::Tasks {
+                    action:
+                        TasksAction::Cancel {
+                            server,
+                            task_id,
+                            reason,
+                            ..
+                        },
+                } => {
                     assert_eq!(server, "./server");
                     assert_eq!(task_id, "task-001");
                     assert_eq!(reason, Some("no longer needed".to_string()));
@@ -2441,11 +2530,12 @@ mod tests {
 
         #[test]
         fn test_tasks_stats_command() {
-            let cli = Cli::try_parse_from([
-                "fastmcp", "tasks", "stats", "--json", "./server"
-            ]).unwrap();
+            let cli =
+                Cli::try_parse_from(["fastmcp", "tasks", "stats", "--json", "./server"]).unwrap();
             match cli.command {
-                Commands::Tasks { action: TasksAction::Stats { server, json, .. } } => {
+                Commands::Tasks {
+                    action: TasksAction::Stats { server, json, .. },
+                } => {
                     assert_eq!(server, "./server");
                     assert!(json);
                 }
@@ -2463,13 +2553,34 @@ mod tests {
 
         #[test]
         fn test_task_status_filter_from_str() {
-            assert_eq!("pending".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Pending);
-            assert_eq!("PENDING".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Pending);
-            assert_eq!("running".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Running);
-            assert_eq!("completed".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Completed);
-            assert_eq!("failed".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Failed);
-            assert_eq!("cancelled".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Cancelled);
-            assert_eq!("canceled".parse::<TaskStatusFilter>().unwrap(), TaskStatusFilter::Cancelled);
+            assert_eq!(
+                "pending".parse::<TaskStatusFilter>().unwrap(),
+                TaskStatusFilter::Pending
+            );
+            assert_eq!(
+                "PENDING".parse::<TaskStatusFilter>().unwrap(),
+                TaskStatusFilter::Pending
+            );
+            assert_eq!(
+                "running".parse::<TaskStatusFilter>().unwrap(),
+                TaskStatusFilter::Running
+            );
+            assert_eq!(
+                "completed".parse::<TaskStatusFilter>().unwrap(),
+                TaskStatusFilter::Completed
+            );
+            assert_eq!(
+                "failed".parse::<TaskStatusFilter>().unwrap(),
+                TaskStatusFilter::Failed
+            );
+            assert_eq!(
+                "cancelled".parse::<TaskStatusFilter>().unwrap(),
+                TaskStatusFilter::Cancelled
+            );
+            assert_eq!(
+                "canceled".parse::<TaskStatusFilter>().unwrap(),
+                TaskStatusFilter::Cancelled
+            );
         }
 
         #[test]
@@ -2481,18 +2592,42 @@ mod tests {
 
         #[test]
         fn test_task_status_filter_to_task_status() {
-            assert!(matches!(TaskStatus::from(TaskStatusFilter::Pending), TaskStatus::Pending));
-            assert!(matches!(TaskStatus::from(TaskStatusFilter::Running), TaskStatus::Running));
-            assert!(matches!(TaskStatus::from(TaskStatusFilter::Completed), TaskStatus::Completed));
-            assert!(matches!(TaskStatus::from(TaskStatusFilter::Failed), TaskStatus::Failed));
-            assert!(matches!(TaskStatus::from(TaskStatusFilter::Cancelled), TaskStatus::Cancelled));
+            assert!(matches!(
+                TaskStatus::from(TaskStatusFilter::Pending),
+                TaskStatus::Pending
+            ));
+            assert!(matches!(
+                TaskStatus::from(TaskStatusFilter::Running),
+                TaskStatus::Running
+            ));
+            assert!(matches!(
+                TaskStatus::from(TaskStatusFilter::Completed),
+                TaskStatus::Completed
+            ));
+            assert!(matches!(
+                TaskStatus::from(TaskStatusFilter::Failed),
+                TaskStatus::Failed
+            ));
+            assert!(matches!(
+                TaskStatus::from(TaskStatusFilter::Cancelled),
+                TaskStatus::Cancelled
+            ));
         }
 
         #[test]
         fn test_inspect_format_from_str() {
-            assert_eq!("text".parse::<InspectFormat>().unwrap(), InspectFormat::Text);
-            assert_eq!("TEXT".parse::<InspectFormat>().unwrap(), InspectFormat::Text);
-            assert_eq!("json".parse::<InspectFormat>().unwrap(), InspectFormat::Json);
+            assert_eq!(
+                "text".parse::<InspectFormat>().unwrap(),
+                InspectFormat::Text
+            );
+            assert_eq!(
+                "TEXT".parse::<InspectFormat>().unwrap(),
+                InspectFormat::Text
+            );
+            assert_eq!(
+                "json".parse::<InspectFormat>().unwrap(),
+                InspectFormat::Json
+            );
             assert_eq!("mcp".parse::<InspectFormat>().unwrap(), InspectFormat::Mcp);
         }
 
@@ -2524,8 +2659,14 @@ mod tests {
 
         #[test]
         fn test_dev_transport_from_str() {
-            assert_eq!("stdio".parse::<DevTransport>().unwrap(), DevTransport::Stdio);
-            assert_eq!("STDIO".parse::<DevTransport>().unwrap(), DevTransport::Stdio);
+            assert_eq!(
+                "stdio".parse::<DevTransport>().unwrap(),
+                DevTransport::Stdio
+            );
+            assert_eq!(
+                "STDIO".parse::<DevTransport>().unwrap(),
+                DevTransport::Stdio
+            );
             assert_eq!("sse".parse::<DevTransport>().unwrap(), DevTransport::Sse);
             assert_eq!("http".parse::<DevTransport>().unwrap(), DevTransport::Http);
         }
@@ -2544,10 +2685,22 @@ mod tests {
 
         #[test]
         fn test_install_target_from_str() {
-            assert_eq!("claude".parse::<InstallTarget>().unwrap(), InstallTarget::Claude);
-            assert_eq!("CLAUDE".parse::<InstallTarget>().unwrap(), InstallTarget::Claude);
-            assert_eq!("cursor".parse::<InstallTarget>().unwrap(), InstallTarget::Cursor);
-            assert_eq!("cline".parse::<InstallTarget>().unwrap(), InstallTarget::Cline);
+            assert_eq!(
+                "claude".parse::<InstallTarget>().unwrap(),
+                InstallTarget::Claude
+            );
+            assert_eq!(
+                "CLAUDE".parse::<InstallTarget>().unwrap(),
+                InstallTarget::Claude
+            );
+            assert_eq!(
+                "cursor".parse::<InstallTarget>().unwrap(),
+                InstallTarget::Cursor
+            );
+            assert_eq!(
+                "cline".parse::<InstallTarget>().unwrap(),
+                InstallTarget::Cline
+            );
         }
 
         #[test]
@@ -2642,9 +2795,7 @@ mod tests {
                 source: "Claude".to_string(),
                 command: "/path/to/server".to_string(),
                 args: vec!["--config".to_string(), "config.json".to_string()],
-                env: Some(HashMap::from([
-                    ("FOO".to_string(), "bar".to_string()),
-                ])),
+                env: Some(HashMap::from([("FOO".to_string(), "bar".to_string())])),
                 enabled: true,
             };
 
@@ -2740,15 +2891,13 @@ mod tests {
             let report = TestReport {
                 server: "./my-server".to_string(),
                 success: true,
-                tests: vec![
-                    TestResult {
-                        name: "init".to_string(),
-                        success: true,
-                        duration_ms: 10.0,
-                        details: None,
-                        error: None,
-                    },
-                ],
+                tests: vec![TestResult {
+                    name: "init".to_string(),
+                    success: true,
+                    duration_ms: 10.0,
+                    details: None,
+                    error: None,
+                }],
                 total_duration_ms: 100.0,
             };
 
@@ -2763,9 +2912,10 @@ mod tests {
             let config = McpServerConfig {
                 command: "node".to_string(),
                 args: vec!["server.js".to_string()],
-                env: Some(HashMap::from([
-                    ("NODE_ENV".to_string(), "production".to_string()),
-                ])),
+                env: Some(HashMap::from([(
+                    "NODE_ENV".to_string(),
+                    "production".to_string(),
+                )])),
             };
 
             let json = serde_json::to_string(&config).unwrap();
@@ -2819,11 +2969,34 @@ mod tests {
             }
         }
 
-        fn make_test_capabilities(tools: bool, resources: bool, prompts: bool) -> fastmcp_protocol::ServerCapabilities {
+        fn make_test_capabilities(
+            tools: bool,
+            resources: bool,
+            prompts: bool,
+        ) -> fastmcp_protocol::ServerCapabilities {
             fastmcp_protocol::ServerCapabilities {
-                tools: if tools { Some(fastmcp_protocol::ToolsCapability { list_changed: false }) } else { None },
-                resources: if resources { Some(fastmcp_protocol::ResourcesCapability { subscribe: false, list_changed: false }) } else { None },
-                prompts: if prompts { Some(fastmcp_protocol::PromptsCapability { list_changed: false }) } else { None },
+                tools: if tools {
+                    Some(fastmcp_protocol::ToolsCapability {
+                        list_changed: false,
+                    })
+                } else {
+                    None
+                },
+                resources: if resources {
+                    Some(fastmcp_protocol::ResourcesCapability {
+                        subscribe: false,
+                        list_changed: false,
+                    })
+                } else {
+                    None
+                },
+                prompts: if prompts {
+                    Some(fastmcp_protocol::PromptsCapability {
+                        list_changed: false,
+                    })
+                } else {
+                    None
+                },
                 logging: None,
                 tasks: None,
             }
@@ -2870,14 +3043,7 @@ mod tests {
             let server_info = make_test_server_info();
             let capabilities = make_test_capabilities(true, true, true);
 
-            let output = format_inspect_text(
-                &server_info,
-                &capabilities,
-                &[],
-                &[],
-                &[],
-                &[],
-            );
+            let output = format_inspect_text(&server_info, &capabilities, &[], &[], &[], &[]);
 
             assert!(output.contains("test-server"));
             assert!(output.contains("v1.0.0"));
@@ -2893,14 +3059,7 @@ mod tests {
 
             let tools = vec![make_test_tool("my_tool", Some("A test tool"))];
 
-            let output = format_inspect_text(
-                &server_info,
-                &capabilities,
-                &tools,
-                &[],
-                &[],
-                &[],
-            );
+            let output = format_inspect_text(&server_info, &capabilities, &tools, &[], &[], &[]);
 
             assert!(output.contains("Tools (1)"));
             assert!(output.contains("my_tool"));
@@ -2914,14 +3073,8 @@ mod tests {
 
             let resources = vec![make_test_resource("file:///test.txt", "test file")];
 
-            let output = format_inspect_text(
-                &server_info,
-                &capabilities,
-                &[],
-                &resources,
-                &[],
-                &[],
-            );
+            let output =
+                format_inspect_text(&server_info, &capabilities, &[], &resources, &[], &[]);
 
             assert!(output.contains("Resources (1)"));
             assert!(output.contains("file:///test.txt"));
@@ -2935,14 +3088,7 @@ mod tests {
 
             let prompts = vec![make_test_prompt("greeting", Some("A greeting prompt"))];
 
-            let output = format_inspect_text(
-                &server_info,
-                &capabilities,
-                &[],
-                &[],
-                &[],
-                &prompts,
-            );
+            let output = format_inspect_text(&server_info, &capabilities, &[], &[], &[], &prompts);
 
             assert!(output.contains("Prompts (1)"));
             assert!(output.contains("greeting"));
@@ -2954,14 +3100,7 @@ mod tests {
             let server_info = make_test_server_info();
             let capabilities = make_test_capabilities(true, true, false);
 
-            let result = format_inspect_json(
-                &server_info,
-                &capabilities,
-                &[],
-                &[],
-                &[],
-                &[],
-            );
+            let result = format_inspect_json(&server_info, &capabilities, &[], &[], &[], &[]);
 
             assert!(result.is_ok());
             let json = result.unwrap();
@@ -2986,14 +3125,7 @@ mod tests {
             });
             let tools = vec![tool];
 
-            let result = format_inspect_json(
-                &server_info,
-                &capabilities,
-                &tools,
-                &[],
-                &[],
-                &[],
-            );
+            let result = format_inspect_json(&server_info, &capabilities, &tools, &[], &[], &[]);
 
             assert!(result.is_ok());
             let json = result.unwrap();
@@ -3095,7 +3227,8 @@ mod tests {
 
         #[test]
         fn test_invalid_timeout_value() {
-            let result = Cli::try_parse_from(["fastmcp", "test", "--timeout", "not-a-number", "./server"]);
+            let result =
+                Cli::try_parse_from(["fastmcp", "test", "--timeout", "not-a-number", "./server"]);
             assert!(result.is_err());
         }
 

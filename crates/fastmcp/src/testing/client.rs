@@ -16,8 +16,8 @@ use fastmcp_protocol::{
     Prompt, PromptMessage, ReadResourceParams, ReadResourceResult, RequestId, Resource,
     ResourceContent, ResourceTemplate, ServerCapabilities, ServerInfo, Tool,
 };
-use fastmcp_transport::memory::MemoryTransport;
 use fastmcp_transport::Transport;
+use fastmcp_transport::memory::MemoryTransport;
 
 /// Test client for in-process MCP testing.
 ///

@@ -146,10 +146,14 @@ fn parse_duration_to_millis(s: &str) -> Result<u64, String> {
             current_num.push(c);
         } else if c.is_ascii_alphabetic() {
             if current_num.is_empty() {
-                return Err(format!("unexpected unit character '{c}' without preceding number"));
+                return Err(format!(
+                    "unexpected unit character '{c}' without preceding number"
+                ));
             }
 
-            let num: u64 = current_num.parse().map_err(|_| format!("invalid number: {current_num}"))?;
+            let num: u64 = current_num
+                .parse()
+                .map_err(|_| format!("invalid number: {current_num}"))?;
 
             // Check for multi-character units (ms)
             let unit = if c == 'm' && chars.peek() == Some(&'s') {
@@ -183,7 +187,9 @@ fn parse_duration_to_millis(s: &str) -> Result<u64, String> {
     }
 
     if !current_num.is_empty() {
-        return Err(format!("number '{current_num}' missing unit (use s, m, h, or ms)"));
+        return Err(format!(
+            "number '{current_num}' missing unit (use s, m, h, or ms)"
+        ));
     }
 
     if total_millis == 0 {
@@ -683,7 +689,12 @@ impl Parse for ToolAttrs {
             }
         }
 
-        Ok(Self { name, description, timeout, output_schema })
+        Ok(Self {
+            name,
+            description,
+            timeout,
+            output_schema,
+        })
     }
 }
 
@@ -733,9 +744,12 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
             Err(e) => {
-                return syn::Error::new_spanned(&input_fn.sig.ident, format!("invalid timeout: {e}"))
-                    .to_compile_error()
-                    .into();
+                return syn::Error::new_spanned(
+                    &input_fn.sig.ident,
+                    format!("invalid timeout: {e}"),
+                )
+                .to_compile_error()
+                .into();
             }
         }
     } else {
@@ -743,18 +757,19 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     // Parse output_schema attribute
-    let (output_schema_field, output_schema_method) = if let Some(ref schema_expr) = attrs.output_schema {
-        (
-            quote! { Some(#schema_expr) },
-            quote! {
-                fn output_schema(&self) -> Option<serde_json::Value> {
-                    Some(#schema_expr)
-                }
-            }
-        )
-    } else {
-        (quote! { None }, quote! {})
-    };
+    let (output_schema_field, output_schema_method) =
+        if let Some(ref schema_expr) = attrs.output_schema {
+            (
+                quote! { Some(#schema_expr) },
+                quote! {
+                    fn output_schema(&self) -> Option<serde_json::Value> {
+                        Some(#schema_expr)
+                    }
+                },
+            )
+        } else {
+            (quote! { None }, quote! {})
+        };
 
     // Parse parameters (skip first if it's &McpContext)
     let mut params: Vec<(&Ident, &Type, Option<String>)> = Vec::new();
@@ -1056,9 +1071,12 @@ pub fn resource(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
             Err(e) => {
-                return syn::Error::new_spanned(&input_fn.sig.ident, format!("invalid timeout: {e}"))
-                    .to_compile_error()
-                    .into();
+                return syn::Error::new_spanned(
+                    &input_fn.sig.ident,
+                    format!("invalid timeout: {e}"),
+                )
+                .to_compile_error()
+                .into();
             }
         }
     } else {
@@ -1310,7 +1328,11 @@ impl Parse for PromptAttrs {
             }
         }
 
-        Ok(Self { name, description, timeout })
+        Ok(Self {
+            name,
+            description,
+            timeout,
+        })
     }
 }
 
@@ -1355,9 +1377,12 @@ pub fn prompt(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
             Err(e) => {
-                return syn::Error::new_spanned(&input_fn.sig.ident, format!("invalid timeout: {e}"))
-                    .to_compile_error()
-                    .into();
+                return syn::Error::new_spanned(
+                    &input_fn.sig.ident,
+                    format!("invalid timeout: {e}"),
+                )
+                .to_compile_error()
+                .into();
             }
         }
     } else {

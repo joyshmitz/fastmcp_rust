@@ -2,7 +2,7 @@
 //!
 //! Provides convenient assertion functions for validating protocol messages.
 
-use fastmcp_protocol::{JsonRpcMessage, JsonRpcRequest, JsonRpcResponse, JSONRPC_VERSION};
+use fastmcp_protocol::{JSONRPC_VERSION, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse};
 
 /// Validates that a JSON-RPC message is well-formed.
 ///
@@ -176,40 +176,28 @@ pub fn assert_mcp_compliant(method: &str, response: &JsonRpcResponse) {
                 result.get("tools").is_some(),
                 "tools/list response must have tools array"
             );
-            assert!(
-                result["tools"].is_array(),
-                "tools must be an array"
-            );
+            assert!(result["tools"].is_array(), "tools must be an array");
         }
         "tools/call" => {
             assert!(
                 result.get("content").is_some(),
                 "tools/call response must have content"
             );
-            assert!(
-                result["content"].is_array(),
-                "content must be an array"
-            );
+            assert!(result["content"].is_array(), "content must be an array");
         }
         "resources/list" => {
             assert!(
                 result.get("resources").is_some(),
                 "resources/list response must have resources array"
             );
-            assert!(
-                result["resources"].is_array(),
-                "resources must be an array"
-            );
+            assert!(result["resources"].is_array(), "resources must be an array");
         }
         "resources/read" => {
             assert!(
                 result.get("contents").is_some(),
                 "resources/read response must have contents"
             );
-            assert!(
-                result["contents"].is_array(),
-                "contents must be an array"
-            );
+            assert!(result["contents"].is_array(), "contents must be an array");
         }
         "resources/templates/list" => {
             assert!(
@@ -226,20 +214,14 @@ pub fn assert_mcp_compliant(method: &str, response: &JsonRpcResponse) {
                 result.get("prompts").is_some(),
                 "prompts/list response must have prompts array"
             );
-            assert!(
-                result["prompts"].is_array(),
-                "prompts must be an array"
-            );
+            assert!(result["prompts"].is_array(), "prompts must be an array");
         }
         "prompts/get" => {
             assert!(
                 result.get("messages").is_some(),
                 "prompts/get response must have messages"
             );
-            assert!(
-                result["messages"].is_array(),
-                "messages must be an array"
-            );
+            assert!(result["messages"].is_array(), "messages must be an array");
         }
         _ => {
             // Unknown method - just verify it's valid JSON
@@ -253,20 +235,11 @@ pub fn assert_mcp_compliant(method: &str, response: &JsonRpcResponse) {
 ///
 /// Panics if the tool is malformed.
 pub fn assert_tool_valid(tool: &serde_json::Value) {
-    assert!(
-        tool.get("name").is_some(),
-        "Tool must have a name"
-    );
-    assert!(
-        tool["name"].is_string(),
-        "Tool name must be a string"
-    );
+    assert!(tool.get("name").is_some(), "Tool must have a name");
+    assert!(tool["name"].is_string(), "Tool name must be a string");
     // inputSchema is optional but if present must be an object
     if let Some(schema) = tool.get("inputSchema") {
-        assert!(
-            schema.is_object(),
-            "inputSchema must be an object"
-        );
+        assert!(schema.is_object(), "inputSchema must be an object");
     }
 }
 
@@ -276,18 +249,9 @@ pub fn assert_tool_valid(tool: &serde_json::Value) {
 ///
 /// Panics if the resource is malformed.
 pub fn assert_resource_valid(resource: &serde_json::Value) {
-    assert!(
-        resource.get("uri").is_some(),
-        "Resource must have a uri"
-    );
-    assert!(
-        resource["uri"].is_string(),
-        "Resource uri must be a string"
-    );
-    assert!(
-        resource.get("name").is_some(),
-        "Resource must have a name"
-    );
+    assert!(resource.get("uri").is_some(), "Resource must have a uri");
+    assert!(resource["uri"].is_string(), "Resource uri must be a string");
+    assert!(resource.get("name").is_some(), "Resource must have a name");
     assert!(
         resource["name"].is_string(),
         "Resource name must be a string"
@@ -300,14 +264,8 @@ pub fn assert_resource_valid(resource: &serde_json::Value) {
 ///
 /// Panics if the prompt is malformed.
 pub fn assert_prompt_valid(prompt: &serde_json::Value) {
-    assert!(
-        prompt.get("name").is_some(),
-        "Prompt must have a name"
-    );
-    assert!(
-        prompt["name"].is_string(),
-        "Prompt name must be a string"
-    );
+    assert!(prompt.get("name").is_some(), "Prompt must have a name");
+    assert!(prompt["name"].is_string(), "Prompt name must be a string");
 }
 
 /// Validates that content is MCP-compliant.
@@ -316,10 +274,7 @@ pub fn assert_prompt_valid(prompt: &serde_json::Value) {
 ///
 /// Panics if the content is malformed.
 pub fn assert_content_valid(content: &serde_json::Value) {
-    assert!(
-        content.get("type").is_some(),
-        "Content must have a type"
-    );
+    assert!(content.get("type").is_some(), "Content must have a type");
     let content_type = content["type"].as_str().expect("type must be a string");
     match content_type {
         "text" => {
@@ -382,10 +337,7 @@ pub fn assert_is_notification(request: &JsonRpcRequest) {
 ///
 /// Panics if the request is a notification.
 pub fn assert_is_request(request: &JsonRpcRequest) {
-    assert!(
-        request.id.is_some(),
-        "Request must have an id field"
-    );
+    assert!(request.id.is_some(), "Request must have an id field");
 }
 
 #[cfg(test)]

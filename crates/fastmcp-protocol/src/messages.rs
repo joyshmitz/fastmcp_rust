@@ -1095,7 +1095,10 @@ mod tests {
 
     #[test]
     fn progress_token_display() {
-        assert_eq!(format!("{}", ProgressToken::String("tok-1".to_string())), "tok-1");
+        assert_eq!(
+            format!("{}", ProgressToken::String("tok-1".to_string())),
+            "tok-1"
+        );
         assert_eq!(format!("{}", ProgressToken::Number(42)), "42");
     }
 

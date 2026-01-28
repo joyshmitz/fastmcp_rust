@@ -1136,10 +1136,7 @@ mod tests {
             "progress": 0.0
         });
         let params: ClientProgressParams = serde_json::from_value(json).unwrap();
-        assert_eq!(
-            params.marker,
-            ProgressMarker::String("tok-1".to_string())
-        );
+        assert_eq!(params.marker, ProgressMarker::String("tok-1".to_string()));
         assert!(params.total.is_none());
         assert!(params.message.is_none());
     }

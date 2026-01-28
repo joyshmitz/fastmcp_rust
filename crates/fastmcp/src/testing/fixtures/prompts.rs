@@ -24,13 +24,11 @@ pub fn greeting_prompt() -> Prompt {
     Prompt {
         name: "greeting".to_string(),
         description: Some("Generate a greeting for a person".to_string()),
-        arguments: vec![
-            PromptArgument {
-                name: "name".to_string(),
-                description: Some("The name of the person to greet".to_string()),
-                required: true,
-            },
-        ],
+        arguments: vec![PromptArgument {
+            name: "name".to_string(),
+            description: Some("The name of the person to greet".to_string()),
+            required: true,
+        }],
         icon: None,
         version: Some("1.0.0".to_string()),
         tags: vec!["greeting".to_string(), "simple".to_string()],
@@ -53,12 +51,16 @@ pub fn code_review_prompt() -> Prompt {
             },
             PromptArgument {
                 name: "language".to_string(),
-                description: Some("Programming language (e.g., rust, python, javascript)".to_string()),
+                description: Some(
+                    "Programming language (e.g., rust, python, javascript)".to_string(),
+                ),
                 required: true,
             },
             PromptArgument {
                 name: "focus".to_string(),
-                description: Some("Specific areas to focus on (e.g., security, performance)".to_string()),
+                description: Some(
+                    "Specific areas to focus on (e.g., security, performance)".to_string(),
+                ),
                 required: false,
             },
         ],

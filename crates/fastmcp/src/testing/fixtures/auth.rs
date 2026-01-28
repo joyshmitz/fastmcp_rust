@@ -132,21 +132,24 @@ impl MockJwt {
     /// Sets the subject claim.
     #[must_use]
     pub fn subject(mut self, sub: impl Into<String>) -> Self {
-        self.payload.insert("sub".to_string(), serde_json::json!(sub.into()));
+        self.payload
+            .insert("sub".to_string(), serde_json::json!(sub.into()));
         self
     }
 
     /// Sets the issuer claim.
     #[must_use]
     pub fn issuer(mut self, iss: impl Into<String>) -> Self {
-        self.payload.insert("iss".to_string(), serde_json::json!(iss.into()));
+        self.payload
+            .insert("iss".to_string(), serde_json::json!(iss.into()));
         self
     }
 
     /// Sets the audience claim.
     #[must_use]
     pub fn audience(mut self, aud: impl Into<String>) -> Self {
-        self.payload.insert("aud".to_string(), serde_json::json!(aud.into()));
+        self.payload
+            .insert("aud".to_string(), serde_json::json!(aud.into()));
         self
     }
 
@@ -158,7 +161,8 @@ impl MockJwt {
             .unwrap_or_default()
             .as_secs()
             + seconds;
-        self.payload.insert("exp".to_string(), serde_json::json!(exp));
+        self.payload
+            .insert("exp".to_string(), serde_json::json!(exp));
         self
     }
 
@@ -170,7 +174,8 @@ impl MockJwt {
             .unwrap_or_default()
             .as_secs()
             - 3600; // 1 hour ago
-        self.payload.insert("exp".to_string(), serde_json::json!(exp));
+        self.payload
+            .insert("exp".to_string(), serde_json::json!(exp));
         self
     }
 
@@ -181,7 +186,8 @@ impl MockJwt {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        self.payload.insert("iat".to_string(), serde_json::json!(iat));
+        self.payload
+            .insert("iat".to_string(), serde_json::json!(iat));
         self
     }
 
@@ -370,7 +376,11 @@ mod tests {
         assert!(token1.len() == "test-".len() + 16);
         // Tokens should be different (though not guaranteed with this simple generator)
         // Just verify they're generated correctly
-        assert!(token1.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+        assert!(
+            token1
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        );
     }
 
     #[test]

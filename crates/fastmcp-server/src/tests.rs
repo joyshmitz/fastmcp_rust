@@ -3213,7 +3213,7 @@ mod handler_definition_tests {
                 name: self.name.clone(),
                 description: Some(format!("Tool with tags: {:?}", self.tags)),
                 input_schema: serde_json::json!({"type": "object"}),
-            output_schema: None,
+                output_schema: None,
                 icon: None,
                 version: None,
                 tags: self.tags.clone(),
@@ -3523,7 +3523,7 @@ mod session_state_tests {
                 name: "increment".to_string(),
                 description: Some("Increments a counter in session state".to_string()),
                 input_schema: serde_json::json!({"type": "object"}),
-            output_schema: None,
+                output_schema: None,
                 icon: None,
                 version: None,
                 tags: vec![],
@@ -4006,7 +4006,7 @@ mod mount_tests {
                 name: "insert".to_string(),
                 description: Some("Inserts data".to_string()),
                 input_schema: serde_json::json!({"type": "object"}),
-            output_schema: None,
+                output_schema: None,
                 icon: None,
                 version: None,
                 tags: vec![],
@@ -4360,7 +4360,7 @@ mod duplicate_behavior_tests {
                 name: "dup_tool".to_string(),
                 description: Some(format!("Tool #{}", self.id)),
                 input_schema: serde_json::json!({"type": "object"}),
-            output_schema: None,
+                output_schema: None,
                 icon: None,
                 version: None,
                 tags: vec![],
@@ -4949,7 +4949,7 @@ mod ctx_call_tool_tests {
                 name: "failing".to_string(),
                 description: Some("Always fails".to_string()),
                 input_schema: serde_json::json!({"type": "object"}),
-            output_schema: None,
+                output_schema: None,
                 icon: None,
                 version: None,
                 tags: vec![],
@@ -5207,7 +5207,7 @@ mod ctx_call_tool_tests {
                 name: "get_state".to_string(),
                 description: Some("Returns session state value".to_string()),
                 input_schema: serde_json::json!({"type": "object"}),
-            output_schema: None,
+                output_schema: None,
                 icon: None,
                 version: None,
                 tags: vec![],
@@ -5232,7 +5232,7 @@ mod ctx_call_tool_tests {
                 name: "nested_state".to_string(),
                 description: Some("Sets state then calls another tool".to_string()),
                 input_schema: serde_json::json!({"type": "object"}),
-            output_schema: None,
+                output_schema: None,
                 icon: None,
                 version: None,
                 tags: vec![],
@@ -5789,11 +5789,8 @@ mod handler_direct_tests {
             version: None,
             tags: vec![],
         };
-        let mounted = MountedResourceHandler::with_template(
-            inner,
-            "ns/resource://{id}".to_string(),
-            tmpl,
-        );
+        let mounted =
+            MountedResourceHandler::with_template(inner, "ns/resource://{id}".to_string(), tmpl);
         let template = mounted.template();
         assert!(template.is_some());
         assert_eq!(template.unwrap().uri_template, "ns/resource://{id}");
@@ -6236,18 +6233,14 @@ mod builder_tests {
 
     #[test]
     fn builder_custom_request_timeout() {
-        let server = ServerBuilder::new("s", "0.1")
-            .request_timeout(60)
-            .build();
+        let server = ServerBuilder::new("s", "0.1").request_timeout(60).build();
         // Builder accepted custom timeout without error
         assert_eq!(server.info().name, "s");
     }
 
     #[test]
     fn builder_zero_timeout_disables_enforcement() {
-        let server = ServerBuilder::new("s", "0.1")
-            .request_timeout(0)
-            .build();
+        let server = ServerBuilder::new("s", "0.1").request_timeout(0).build();
         assert_eq!(server.info().name, "s");
     }
 
@@ -6261,9 +6254,7 @@ mod builder_tests {
 
     #[test]
     fn builder_without_stats_disables_collection() {
-        let server = ServerBuilder::new("s", "0.1")
-            .without_stats()
-            .build();
+        let server = ServerBuilder::new("s", "0.1").without_stats().build();
         assert!(server.stats().is_none());
         assert!(server.stats_collector().is_none());
     }
@@ -6278,8 +6269,7 @@ mod builder_tests {
 
     #[test]
     fn builder_mask_error_details_enables_masking() {
-        let builder = ServerBuilder::new("s", "0.1")
-            .mask_error_details(true);
+        let builder = ServerBuilder::new("s", "0.1").mask_error_details(true);
         assert!(builder.is_error_masking_enabled());
     }
 
@@ -6301,8 +6291,7 @@ mod builder_tests {
 
     #[test]
     fn builder_strict_input_validation_enable() {
-        let builder = ServerBuilder::new("s", "0.1")
-            .strict_input_validation(true);
+        let builder = ServerBuilder::new("s", "0.1").strict_input_validation(true);
         assert!(builder.is_strict_input_validation_enabled());
     }
 
@@ -6360,9 +6349,7 @@ mod builder_tests {
             targets: false,
             file_line: true,
         };
-        let server = ServerBuilder::new("s", "0.1")
-            .logging(config)
-            .build();
+        let server = ServerBuilder::new("s", "0.1").logging(config).build();
         assert_eq!(server.info().name, "s");
     }
 
@@ -6382,9 +6369,7 @@ mod builder_tests {
 
     #[test]
     fn builder_without_banner() {
-        let server = ServerBuilder::new("s", "0.1")
-            .without_banner()
-            .build();
+        let server = ServerBuilder::new("s", "0.1").without_banner().build();
         let cc = server.console_config();
         assert!(!cc.show_banner);
         assert_eq!(cc.banner_style, BannerStyle::None);
@@ -6408,17 +6393,13 @@ mod builder_tests {
 
     #[test]
     fn builder_plain_mode() {
-        let server = ServerBuilder::new("s", "0.1")
-            .plain_mode()
-            .build();
+        let server = ServerBuilder::new("s", "0.1").plain_mode().build();
         assert!(server.console_config().force_plain);
     }
 
     #[test]
     fn builder_force_color() {
-        let server = ServerBuilder::new("s", "0.1")
-            .force_color()
-            .build();
+        let server = ServerBuilder::new("s", "0.1").force_color().build();
         assert_eq!(server.info().name, "s");
     }
 
@@ -6522,9 +6503,10 @@ mod builder_tests {
     fn builder_auth_provider_static_token() {
         let ctx = fastmcp_core::AuthContext::with_subject("test-user");
         let server = ServerBuilder::new("s", "0.1")
-            .auth_provider(TokenAuthProvider::new(StaticTokenVerifier::new(vec![
-                ("secret-token".to_string(), ctx),
-            ])))
+            .auth_provider(TokenAuthProvider::new(StaticTokenVerifier::new(vec![(
+                "secret-token".to_string(),
+                ctx,
+            )])))
             .build();
         assert_eq!(server.info().name, "s");
     }
@@ -6542,9 +6524,7 @@ mod builder_tests {
     #[test]
     fn builder_on_startup_hook() {
         let server = ServerBuilder::new("s", "0.1")
-            .on_startup(|| -> Result<(), std::io::Error> {
-                Ok(())
-            })
+            .on_startup(|| -> Result<(), std::io::Error> { Ok(()) })
             .build();
         assert_eq!(server.info().name, "s");
     }
@@ -6562,9 +6542,7 @@ mod builder_tests {
     #[test]
     fn builder_both_lifecycle_hooks() {
         let server = ServerBuilder::new("s", "0.1")
-            .on_startup(|| -> Result<(), std::io::Error> {
-                Ok(())
-            })
+            .on_startup(|| -> Result<(), std::io::Error> { Ok(()) })
             .on_shutdown(|| {})
             .build();
         assert_eq!(server.info().name, "s");

@@ -411,11 +411,7 @@ impl TestTrace {
         self.entries.push(entry);
 
         if self.console_output {
-            let status = if error_value.is_some() {
-                "ERROR"
-            } else {
-                "OK"
-            };
+            let status = if error_value.is_some() { "ERROR" } else { "OK" };
             eprintln!("[{timestamp}] <- {method} ({duration_ms:.2}ms) {status}");
         }
     }
@@ -450,11 +446,7 @@ impl TestTrace {
         self.entries.push(entry);
 
         if self.console_output {
-            let status = if error_value.is_some() {
-                "ERROR"
-            } else {
-                "OK"
-            };
+            let status = if error_value.is_some() { "ERROR" } else { "OK" };
             eprintln!("[{timestamp}] <- {method} ({duration_ms:.2}ms) {status}");
         }
     }
@@ -463,7 +455,10 @@ impl TestTrace {
     ///
     /// Returns the span ID.
     pub fn start_span(&mut self, name: impl Into<String>) -> String {
-        let span_id = format!("span-{:08x}", CORRELATION_ID_COUNTER.fetch_add(1, Ordering::SeqCst));
+        let span_id = format!(
+            "span-{:08x}",
+            CORRELATION_ID_COUNTER.fetch_add(1, Ordering::SeqCst)
+        );
         let parent_id = self.current_span_id().map(String::from);
         let name = name.into();
         let timestamp = current_timestamp();
@@ -510,7 +505,10 @@ impl TestTrace {
             if self.console_output {
                 let indent = "  ".repeat(self.active_spans.len());
                 let status = if error.is_some() { " FAILED" } else { "" };
-                eprintln!("[{timestamp}] {indent}└─ {} ({duration_ms:.2}ms){status}", span.name);
+                eprintln!(
+                    "[{timestamp}] {indent}└─ {} ({duration_ms:.2}ms){status}",
+                    span.name
+                );
             }
         }
     }
@@ -749,7 +747,10 @@ impl TestTrace {
         if !output.summary.method_timings.is_empty() {
             eprintln!("\nMethod Timings:");
             for (method, timing) in &output.summary.method_timings {
-                let mean = timing.mean_ms.map(|m| format!("{m:.2}")).unwrap_or_default();
+                let mean = timing
+                    .mean_ms
+                    .map(|m| format!("{m:.2}"))
+                    .unwrap_or_default();
                 let min = timing.min_ms.map(|m| format!("{m:.2}")).unwrap_or_default();
                 let max = timing.max_ms.map(|m| format!("{m:.2}")).unwrap_or_default();
                 eprintln!(
@@ -934,7 +935,11 @@ mod tests {
         let id2 = trace.log_request("tools/call", None::<&()>);
 
         trace.log_response(&id1, Some(&serde_json::json!({"tools": []})), None::<&()>);
-        trace.log_response(&id2, None::<&()>, Some(&serde_json::json!({"error": "test"})));
+        trace.log_response(
+            &id2,
+            None::<&()>,
+            Some(&serde_json::json!({"error": "test"})),
+        );
 
         let output = trace.build_output();
         assert_eq!(output.summary.request_count, 2);

@@ -1051,9 +1051,7 @@ mod tests {
         }
 
         fn list_prompts(&mut self) -> fastmcp_core::McpResult<Vec<Prompt>> {
-            Err(fastmcp_core::McpError::internal_error(
-                "prompt list failed",
-            ))
+            Err(fastmcp_core::McpError::internal_error("prompt list failed"))
         }
 
         fn call_tool(
@@ -1073,10 +1071,7 @@ mod tests {
             Err(fastmcp_core::McpError::internal_error("tool call failed"))
         }
 
-        fn read_resource(
-            &mut self,
-            _uri: &str,
-        ) -> fastmcp_core::McpResult<Vec<ResourceContent>> {
+        fn read_resource(&mut self, _uri: &str) -> fastmcp_core::McpResult<Vec<ResourceContent>> {
             Err(fastmcp_core::McpError::internal_error(
                 "resource read failed",
             ))
@@ -1087,9 +1082,7 @@ mod tests {
             _name: &str,
             _arguments: HashMap<String, String>,
         ) -> fastmcp_core::McpResult<Vec<PromptMessage>> {
-            Err(fastmcp_core::McpError::internal_error(
-                "prompt get failed",
-            ))
+            Err(fastmcp_core::McpError::internal_error("prompt get failed"))
         }
     }
 
@@ -1192,10 +1185,7 @@ mod tests {
         assert_eq!(resource.uri, "db://{table}/{id}");
         assert_eq!(resource.name, "Database Record");
         assert_eq!(resource.description, Some("A database record".to_string()));
-        assert_eq!(
-            resource.mime_type,
-            Some("application/json".to_string())
-        );
+        assert_eq!(resource.mime_type, Some("application/json".to_string()));
         assert_eq!(resource.version, Some("1.0.0".to_string()));
         assert_eq!(resource.tags, vec!["db".to_string()]);
     }

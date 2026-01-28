@@ -70,9 +70,7 @@ impl ClientSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fastmcp_protocol::{
-        PromptsCapability, ResourcesCapability, ToolsCapability,
-    };
+    use fastmcp_protocol::{PromptsCapability, ResourcesCapability, ToolsCapability};
 
     fn test_session() -> ClientSession {
         ClientSession::new(
@@ -91,7 +89,9 @@ mod tests {
                     subscribe: true,
                     list_changed: false,
                 }),
-                prompts: Some(PromptsCapability { list_changed: false }),
+                prompts: Some(PromptsCapability {
+                    list_changed: false,
+                }),
                 logging: None,
                 tasks: None,
             },

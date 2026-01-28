@@ -4,7 +4,7 @@
 //! actual handler implementations via MemoryTransport.
 
 use fastmcp_server::{Router, Server, ServerBuilder};
-use fastmcp_transport::memory::{create_memory_transport_pair, MemoryTransport};
+use fastmcp_transport::memory::{MemoryTransport, create_memory_transport_pair};
 
 /// Builder for creating test servers with real handlers.
 ///

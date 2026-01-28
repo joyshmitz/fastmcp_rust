@@ -1447,9 +1447,7 @@ impl McpContext {
     /// Returns `false` if capabilities are not yet available.
     #[must_use]
     pub fn client_supports_roots(&self) -> bool {
-        self.client_capabilities
-            .as_ref()
-            .is_some_and(|c| c.roots)
+        self.client_capabilities.as_ref().is_some_and(|c| c.roots)
     }
 
     // ========================================================================
@@ -2712,7 +2710,11 @@ mod tests {
         assert!(!caps.prompts);
         assert!(!caps.logging);
 
-        let caps = caps.with_tools().with_resources(false).with_prompts().with_logging();
+        let caps = caps
+            .with_tools()
+            .with_resources(false)
+            .with_prompts()
+            .with_logging();
         assert!(caps.tools);
         assert!(caps.resources);
         assert!(!caps.resources_subscribe);

@@ -6,9 +6,8 @@
 //! doc comments, async handling, and return type conversion.
 
 use fastmcp::{
-    Content, Cx, JsonSchema, McpContext, McpResult, PromptMessage, Role,
-    PromptHandler, ResourceHandler, ToolHandler,
-    prompt, resource, tool,
+    Content, Cx, JsonSchema, McpContext, McpResult, PromptHandler, PromptMessage, ResourceHandler,
+    Role, ToolHandler, prompt, resource, tool,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -326,10 +325,7 @@ fn long_timed_tool() -> String {
 fn tool_timeout_compound() {
     let handler = LongTimedTool;
     let timeout = handler.timeout();
-    assert_eq!(
-        timeout,
-        Some(std::time::Duration::from_secs(90 * 60))
-    );
+    assert_eq!(timeout, Some(std::time::Duration::from_secs(90 * 60)));
 }
 
 // --- Tool with bool parameter ---
@@ -407,10 +403,7 @@ fn async_tool_definition() {
     let handler = AsyncGreet;
     let def = handler.definition();
     assert_eq!(def.name, "async_greet");
-    assert_eq!(
-        def.description,
-        Some("An async greeting tool.".to_string())
-    );
+    assert_eq!(def.description, Some("An async greeting tool.".to_string()));
 }
 
 #[test]
@@ -661,10 +654,7 @@ fn timed_resource() -> String {
 #[test]
 fn resource_timeout() {
     let handler = TimedResourceResource;
-    assert_eq!(
-        handler.timeout(),
-        Some(std::time::Duration::from_secs(5))
-    );
+    assert_eq!(handler.timeout(), Some(std::time::Duration::from_secs(5)));
 }
 
 // --- Resource returning Result ---
@@ -876,10 +866,7 @@ fn timed_prompt(text: String) -> Vec<PromptMessage> {
 #[test]
 fn prompt_timeout() {
     let handler = TimedPromptPrompt;
-    assert_eq!(
-        handler.timeout(),
-        Some(std::time::Duration::from_secs(10))
-    );
+    assert_eq!(handler.timeout(), Some(std::time::Duration::from_secs(10)));
 }
 
 // --- Prompt with context ---
@@ -1208,10 +1195,7 @@ fn json_schema_hashmap_field() {
     let schema = MapStruct::json_schema();
     let props = schema["properties"].as_object().unwrap();
     assert_eq!(props["metadata"]["type"], "object");
-    assert_eq!(
-        props["metadata"]["additionalProperties"]["type"],
-        "string"
-    );
+    assert_eq!(props["metadata"]["additionalProperties"]["type"], "string");
 }
 
 // --- Empty struct ---

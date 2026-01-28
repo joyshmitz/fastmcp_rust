@@ -366,7 +366,12 @@ impl ToolBuilder {
 
     /// Adds a string parameter.
     #[must_use]
-    pub fn with_string_param(mut self, name: impl Into<String>, desc: impl Into<String>, required: bool) -> Self {
+    pub fn with_string_param(
+        mut self,
+        name: impl Into<String>,
+        desc: impl Into<String>,
+        required: bool,
+    ) -> Self {
         let name = name.into();
         self.properties.insert(
             name.clone(),
@@ -383,7 +388,12 @@ impl ToolBuilder {
 
     /// Adds a number parameter.
     #[must_use]
-    pub fn with_number_param(mut self, name: impl Into<String>, desc: impl Into<String>, required: bool) -> Self {
+    pub fn with_number_param(
+        mut self,
+        name: impl Into<String>,
+        desc: impl Into<String>,
+        required: bool,
+    ) -> Self {
         let name = name.into();
         self.properties.insert(
             name.clone(),
@@ -400,7 +410,12 @@ impl ToolBuilder {
 
     /// Adds a boolean parameter.
     #[must_use]
-    pub fn with_bool_param(mut self, name: impl Into<String>, desc: impl Into<String>, required: bool) -> Self {
+    pub fn with_bool_param(
+        mut self,
+        name: impl Into<String>,
+        desc: impl Into<String>,
+        required: bool,
+    ) -> Self {
         let name = name.into();
         self.properties.insert(
             name.clone(),

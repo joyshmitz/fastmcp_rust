@@ -14,8 +14,8 @@ use std::collections::HashMap;
 
 use fastmcp::testing::prelude::*;
 use fastmcp::{
-    McpContext, McpResult, PromptHandler, PromptMessage, Resource, ResourceContent, ResourceHandler,
-    ResourceTemplate, Role, ToolHandler,
+    McpContext, McpResult, PromptHandler, PromptMessage, Resource, ResourceContent,
+    ResourceHandler, ResourceTemplate, Role, ToolHandler,
 };
 use fastmcp_protocol::{Prompt, PromptArgument, Tool, ToolAnnotations};
 use serde_json::json;
@@ -63,7 +63,9 @@ impl ToolHandler for CounterToolHandler {
     fn definition(&self) -> Tool {
         Tool {
             name: "counter".to_string(),
-            description: Some("Returns the call count (not truly stateful, returns arg)".to_string()),
+            description: Some(
+                "Returns the call count (not truly stateful, returns arg)".to_string(),
+            ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -326,10 +328,12 @@ fn workflow_complete_lifecycle() {
     let mut args = HashMap::new();
     args.insert("topic".to_string(), "MCP protocol".to_string());
     let help = client.get_prompt("help", args).unwrap();
-    assert!(help[0]
-        .content
-        .as_text()
-        .map_or(false, |t| t.contains("MCP protocol")));
+    assert!(
+        help[0]
+            .content
+            .as_text()
+            .map_or(false, |t| t.contains("MCP protocol"))
+    );
 
     // Phase 4: Close
     client.close();
@@ -359,7 +363,11 @@ fn workflow_discover_then_operate() {
     let resources = client.list_resources().unwrap();
     for resource in &resources {
         let content = client.read_resource(&resource.uri).unwrap();
-        assert!(!content.is_empty(), "Resource {} returned empty", resource.uri);
+        assert!(
+            !content.is_empty(),
+            "Resource {} returned empty",
+            resource.uri
+        );
     }
 }
 
@@ -596,9 +604,7 @@ fn workflow_interleaved_list_and_call() {
         let tools = client.list_tools().unwrap();
         assert_eq!(tools.len(), 3);
 
-        let result = client
-            .call_tool("counter", json!({"value": 42}))
-            .unwrap();
+        let result = client.call_tool("counter", json!({"value": 42})).unwrap();
         match &result[0] {
             Content::Text { text } => assert_eq!(text, "42"),
             other => panic!("Expected text, got: {other:?}"),
@@ -635,8 +641,8 @@ fn workflow_server_name_and_version() {
 
 #[test]
 fn workflow_capabilities_match_handlers() {
-    let (builder, client_transport, server_transport) = TestServer::builder()
-        .build_server_builder();
+    let (builder, client_transport, server_transport) =
+        TestServer::builder().build_server_builder();
 
     let server = builder
         .tool(EchoToolHandler)
@@ -659,14 +665,14 @@ fn workflow_capabilities_match_handlers() {
 
 #[test]
 fn workflow_custom_client_info_accepted() {
-    let (builder, client_transport, server_transport) = TestServer::builder()
-        .build_server_builder();
+    let (builder, client_transport, server_transport) =
+        TestServer::builder().build_server_builder();
 
     let server = builder.tool(EchoToolHandler).build();
     std::thread::spawn(move || server.run_transport(server_transport));
 
-    let mut client = TestClient::new(client_transport)
-        .with_client_info("my-custom-client", "5.0.0");
+    let mut client =
+        TestClient::new(client_transport).with_client_info("my-custom-client", "5.0.0");
 
     // Should initialize successfully with custom client info
     let init = client.initialize().unwrap();
@@ -703,10 +709,7 @@ fn workflow_tool_descriptions_preserved() {
 
     let tools = client.list_tools().unwrap();
     let echo = tools.iter().find(|t| t.name == "echo").unwrap();
-    assert_eq!(
-        echo.description.as_deref(),
-        Some("Echoes back the input")
-    );
+    assert_eq!(echo.description.as_deref(), Some("Echoes back the input"));
     assert_eq!(echo.version.as_deref(), Some("1.0.0"));
 }
 
@@ -718,10 +721,7 @@ fn workflow_resource_metadata_preserved() {
     let resources = client.list_resources().unwrap();
     let readme = resources.iter().find(|r| r.name == "README").unwrap();
     assert_eq!(readme.mime_type.as_deref(), Some("text/markdown"));
-    assert_eq!(
-        readme.description.as_deref(),
-        Some("Project README file")
-    );
+    assert_eq!(readme.description.as_deref(), Some("Project README file"));
     assert_eq!(readme.version.as_deref(), Some("1.0.0"));
 }
 
@@ -737,10 +737,7 @@ fn workflow_prompt_arguments_preserved() {
     assert_eq!(help.arguments[0].name, "topic");
     assert!(help.arguments[0].required);
 
-    let system = prompts
-        .iter()
-        .find(|p| p.name == "system_prompt")
-        .unwrap();
+    let system = prompts.iter().find(|p| p.name == "system_prompt").unwrap();
     assert!(system.arguments.is_empty());
 }
 

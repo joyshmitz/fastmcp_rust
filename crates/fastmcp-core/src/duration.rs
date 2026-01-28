@@ -163,20 +163,17 @@ mod tests {
     #[test]
     fn test_parse_milliseconds() {
         assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
-        assert_eq!(parse_duration("1000ms").unwrap(), Duration::from_millis(1000));
+        assert_eq!(
+            parse_duration("1000ms").unwrap(),
+            Duration::from_millis(1000)
+        );
         assert_eq!(parse_duration("1ms").unwrap(), Duration::from_millis(1));
     }
 
     #[test]
     fn test_parse_combined() {
-        assert_eq!(
-            parse_duration("1h30m").unwrap(),
-            Duration::from_secs(5400)
-        );
-        assert_eq!(
-            parse_duration("2m30s").unwrap(),
-            Duration::from_secs(150)
-        );
+        assert_eq!(parse_duration("1h30m").unwrap(), Duration::from_secs(5400));
+        assert_eq!(parse_duration("2m30s").unwrap(), Duration::from_secs(150));
         assert_eq!(
             parse_duration("1h30m45s").unwrap(),
             Duration::from_secs(5445)

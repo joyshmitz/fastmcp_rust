@@ -61,6 +61,24 @@ pub use trace::*;
 /// ```
 pub mod prelude {
     pub use super::{
+        // Timing
+        Stopwatch,
+        // Client
+        TestClient,
+        // Context
+        TestContext,
+        // Server
+        TestServer,
+        TestServerBuilder,
+        // Trace
+        TestTrace,
+        TestTraceBuilder,
+        TestTraceOutput,
+        Timer,
+        TimingStats,
+        TraceEntry,
+        TraceLevel,
+        TraceSummary,
         // Assertions
         assert_content_valid,
         assert_is_notification,
@@ -72,26 +90,8 @@ pub mod prelude {
         assert_prompt_valid,
         assert_resource_valid,
         assert_tool_valid,
-        // Client
-        TestClient,
-        // Context
-        TestContext,
-        // Server
-        TestServer,
-        TestServerBuilder,
-        // Timing
-        Stopwatch,
-        Timer,
-        TimingStats,
-        measure_duration,
-        // Trace
-        TestTrace,
-        TestTraceBuilder,
-        TestTraceOutput,
-        TraceEntry,
-        TraceLevel,
-        TraceSummary,
         is_trace_enabled,
+        measure_duration,
     };
 
     // Re-export commonly used types

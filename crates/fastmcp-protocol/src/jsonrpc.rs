@@ -252,7 +252,10 @@ mod tests {
     #[test]
     fn request_id_display() {
         assert_eq!(format!("{}", RequestId::Number(42)), "42");
-        assert_eq!(format!("{}", RequestId::String("req-1".to_string())), "req-1");
+        assert_eq!(
+            format!("{}", RequestId::String("req-1".to_string())),
+            "req-1"
+        );
     }
 
     #[test]
@@ -309,8 +312,7 @@ mod tests {
     #[test]
     fn notification_with_params() {
         let params = json!({"uri": "file://changed.txt"});
-        let notif =
-            JsonRpcRequest::notification("notifications/resources/updated", Some(params));
+        let notif = JsonRpcRequest::notification("notifications/resources/updated", Some(params));
         assert!(notif.is_notification());
         let value = serde_json::to_value(&notif).expect("serialize");
         assert_eq!(value["params"]["uri"], "file://changed.txt");
@@ -380,10 +382,7 @@ mod tests {
             message: "Parse error".to_string(),
             data: None,
         };
-        assert_eq!(
-            serde_json::to_value(&err).unwrap()["code"],
-            -32700
-        );
+        assert_eq!(serde_json::to_value(&err).unwrap()["code"], -32700);
 
         // Method not found
         let err = JsonRpcError {
@@ -391,10 +390,7 @@ mod tests {
             message: "Method not found".to_string(),
             data: None,
         };
-        assert_eq!(
-            serde_json::to_value(&err).unwrap()["code"],
-            -32601
-        );
+        assert_eq!(serde_json::to_value(&err).unwrap()["code"], -32601);
 
         // Internal error
         let err = JsonRpcError {
@@ -402,10 +398,7 @@ mod tests {
             message: "Internal error".to_string(),
             data: None,
         };
-        assert_eq!(
-            serde_json::to_value(&err).unwrap()["code"],
-            -32603
-        );
+        assert_eq!(serde_json::to_value(&err).unwrap()["code"], -32603);
     }
 
     // ========================================================================
@@ -454,18 +447,13 @@ mod tests {
 
     #[test]
     fn response_round_trip() {
-        let original = JsonRpcResponse::success(
-            RequestId::String("abc".to_string()),
-            json!({"tools": []}),
-        );
+        let original =
+            JsonRpcResponse::success(RequestId::String("abc".to_string()), json!({"tools": []}));
         let json_str = serde_json::to_string(&original).expect("serialize");
         let deserialized: JsonRpcResponse = serde_json::from_str(&json_str).expect("deserialize");
         assert!(!deserialized.is_error());
         assert!(deserialized.result.is_some());
-        assert_eq!(
-            deserialized.id,
-            Some(RequestId::String("abc".to_string()))
-        );
+        assert_eq!(deserialized.id, Some(RequestId::String("abc".to_string())));
     }
 
     // ========================================================================

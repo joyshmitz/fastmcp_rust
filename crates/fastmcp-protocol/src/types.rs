@@ -1025,7 +1025,11 @@ mod tests {
 
     #[test]
     fn icon_serialization() {
-        let icon = Icon::full("https://example.com/icon.svg", "image/svg+xml", "16x16 32x32");
+        let icon = Icon::full(
+            "https://example.com/icon.svg",
+            "image/svg+xml",
+            "16x16 32x32",
+        );
         let value = serde_json::to_value(&icon).expect("serialize");
         assert_eq!(value["src"], "https://example.com/icon.svg");
         assert_eq!(value["mimeType"], "image/svg+xml");
@@ -1517,8 +1521,14 @@ mod tests {
 
     #[test]
     fn task_status_serialization() {
-        assert_eq!(serde_json::to_value(TaskStatus::Pending).unwrap(), "pending");
-        assert_eq!(serde_json::to_value(TaskStatus::Running).unwrap(), "running");
+        assert_eq!(
+            serde_json::to_value(TaskStatus::Pending).unwrap(),
+            "pending"
+        );
+        assert_eq!(
+            serde_json::to_value(TaskStatus::Running).unwrap(),
+            "running"
+        );
         assert_eq!(
             serde_json::to_value(TaskStatus::Completed).unwrap(),
             "completed"

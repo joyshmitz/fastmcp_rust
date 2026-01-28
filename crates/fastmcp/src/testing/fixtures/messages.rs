@@ -6,7 +6,7 @@
 //! - Notifications
 //! - Large payloads for stress testing
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 // ============================================================================
 // Protocol Constants
@@ -150,18 +150,21 @@ pub fn valid_success_response(request_id: u64, result: Value) -> Value {
 /// Creates a valid initialize response.
 #[must_use]
 pub fn valid_initialize_response(request_id: u64) -> Value {
-    valid_success_response(request_id, json!({
-        "protocolVersion": PROTOCOL_VERSION,
-        "serverInfo": {
-            "name": "test-server",
-            "version": "1.0.0"
-        },
-        "capabilities": {
-            "tools": { "listChanged": false },
-            "resources": { "subscribe": false, "listChanged": false },
-            "prompts": { "listChanged": false }
-        }
-    }))
+    valid_success_response(
+        request_id,
+        json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "serverInfo": {
+                "name": "test-server",
+                "version": "1.0.0"
+            },
+            "capabilities": {
+                "tools": { "listChanged": false },
+                "resources": { "subscribe": false, "listChanged": false },
+                "prompts": { "listChanged": false }
+            }
+        }),
+    )
 }
 
 /// Creates a valid tools/list response.
@@ -173,10 +176,13 @@ pub fn valid_tools_list_response(request_id: u64, tools: Vec<Value>) -> Value {
 /// Creates a valid tools/call response.
 #[must_use]
 pub fn valid_tools_call_response(request_id: u64, content: Vec<Value>, is_error: bool) -> Value {
-    valid_success_response(request_id, json!({
-        "content": content,
-        "isError": is_error
-    }))
+    valid_success_response(
+        request_id,
+        json!({
+            "content": content,
+            "isError": is_error
+        }),
+    )
 }
 
 /// Creates a valid resources/list response.
@@ -199,7 +205,11 @@ pub fn valid_prompts_list_response(request_id: u64, prompts: Vec<Value>) -> Valu
 
 /// Creates a valid prompts/get response.
 #[must_use]
-pub fn valid_prompts_get_response(request_id: u64, description: Option<&str>, messages: Vec<Value>) -> Value {
+pub fn valid_prompts_get_response(
+    request_id: u64,
+    description: Option<&str>,
+    messages: Vec<Value>,
+) -> Value {
     let mut result = json!({ "messages": messages });
     if let Some(desc) = description {
         result["description"] = json!(desc);
@@ -293,12 +303,7 @@ pub fn resource_not_found_error_response(request_id: u64, uri: &str) -> Value {
 /// Creates a tool not found error response.
 #[must_use]
 pub fn tool_not_found_error_response(request_id: u64, name: &str) -> Value {
-    error_response(
-        request_id,
-        -32002,
-        &format!("Tool not found: {name}"),
-        None,
-    )
+    error_response(request_id, -32002, &format!("Tool not found: {name}"), None)
 }
 
 /// Creates a prompt not found error response.
@@ -318,7 +323,7 @@ pub fn prompt_not_found_error_response(request_id: u64, name: &str) -> Value {
 
 /// Creates various invalid JSON-RPC messages for testing error handling.
 pub mod invalid {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     /// Missing jsonrpc field.
     #[must_use]
@@ -424,29 +429,38 @@ pub fn notification(method: &str, params: Option<Value>) -> Value {
 /// Creates a progress notification.
 #[must_use]
 pub fn progress_notification(token: &str, progress: f64, message: Option<&str>) -> Value {
-    notification("notifications/progress", Some(json!({
-        "progressToken": token,
-        "progress": progress,
-        "message": message
-    })))
+    notification(
+        "notifications/progress",
+        Some(json!({
+            "progressToken": token,
+            "progress": progress,
+            "message": message
+        })),
+    )
 }
 
 /// Creates a log notification.
 #[must_use]
 pub fn log_notification(level: &str, data: Value) -> Value {
-    notification("notifications/log", Some(json!({
-        "level": level,
-        "data": data
-    })))
+    notification(
+        "notifications/log",
+        Some(json!({
+            "level": level,
+            "data": data
+        })),
+    )
 }
 
 /// Creates a cancelled notification.
 #[must_use]
 pub fn cancelled_notification(request_id: u64, reason: Option<&str>) -> Value {
-    notification("notifications/cancelled", Some(json!({
-        "requestId": request_id,
-        "reason": reason
-    })))
+    notification(
+        "notifications/cancelled",
+        Some(json!({
+            "requestId": request_id,
+            "reason": reason
+        })),
+    )
 }
 
 // ============================================================================
@@ -555,7 +569,12 @@ mod tests {
     fn test_method_not_found_error() {
         let resp = method_not_found_error_response(1, "unknown_method");
         assert_eq!(resp["error"]["code"], -32601);
-        assert!(resp["error"]["message"].as_str().unwrap().contains("unknown_method"));
+        assert!(
+            resp["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("unknown_method")
+        );
     }
 
     #[test]

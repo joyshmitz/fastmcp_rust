@@ -15,8 +15,8 @@ use std::collections::HashMap;
 
 use fastmcp::testing::prelude::*;
 use fastmcp::{
-    McpContext, McpResult, PromptHandler, PromptMessage, Resource, ResourceContent, ResourceHandler,
-    Role, ToolHandler,
+    McpContext, McpResult, PromptHandler, PromptMessage, Resource, ResourceContent,
+    ResourceHandler, Role, ToolHandler,
 };
 use fastmcp_protocol::{Prompt, PromptArgument, Tool, ToolAnnotations};
 use serde_json::json;
@@ -422,10 +422,7 @@ fn e2e_call_tool_calculator_add() {
     client.initialize().unwrap();
 
     let result = client
-        .call_tool(
-            "calculator",
-            json!({"a": 10, "b": 20, "operation": "add"}),
-        )
+        .call_tool("calculator", json!({"a": 10, "b": 20, "operation": "add"}))
         .unwrap();
     assert_eq!(result.len(), 1);
 
@@ -489,10 +486,7 @@ fn e2e_call_tool_division_by_zero() {
         "calculator",
         json!({"a": 10, "b": 0, "operation": "divide"}),
     );
-    assert!(
-        result.is_err(),
-        "Division by zero should return an error"
-    );
+    assert!(result.is_err(), "Division by zero should return an error");
 }
 
 #[test]
@@ -538,16 +532,10 @@ fn e2e_list_resources_returns_metadata() {
     client.initialize().unwrap();
 
     let resources = client.list_resources().unwrap();
-    let text_file = resources
-        .iter()
-        .find(|r| r.name == "sample.txt")
-        .unwrap();
+    let text_file = resources.iter().find(|r| r.name == "sample.txt").unwrap();
 
     assert_eq!(text_file.mime_type.as_deref(), Some("text/plain"));
-    assert_eq!(
-        text_file.description.as_deref(),
-        Some("A sample text file")
-    );
+    assert_eq!(text_file.description.as_deref(), Some("A sample text file"));
 }
 
 #[test]
@@ -560,11 +548,7 @@ fn e2e_read_text_resource() {
     assert_eq!(contents[0].uri, "file:///test/sample.txt");
     assert_eq!(contents[0].mime_type.as_deref(), Some("text/plain"));
     assert!(
-        contents[0]
-            .text
-            .as_ref()
-            .unwrap()
-            .contains("Hello, World!"),
+        contents[0].text.as_ref().unwrap().contains("Hello, World!"),
         "Text content should contain greeting"
     );
 }
@@ -578,10 +562,7 @@ fn e2e_read_json_resource() {
         .read_resource("file:///config/settings.json")
         .unwrap();
     assert_eq!(contents.len(), 1);
-    assert_eq!(
-        contents[0].mime_type.as_deref(),
-        Some("application/json")
-    );
+    assert_eq!(contents[0].mime_type.as_deref(), Some("application/json"));
 
     // Parse the JSON content to verify structure
     let json_text = contents[0].text.as_ref().unwrap();
@@ -621,10 +602,7 @@ fn e2e_list_prompts() {
 
     let names: Vec<&str> = prompts.iter().map(|p| p.name.as_str()).collect();
     assert!(names.contains(&"greeting"), "Missing greeting prompt");
-    assert!(
-        names.contains(&"code_review"),
-        "Missing code_review prompt"
-    );
+    assert!(names.contains(&"code_review"), "Missing code_review prompt");
 }
 
 #[test]
@@ -726,10 +704,7 @@ fn e2e_raw_request_unknown_method() {
     client.initialize().unwrap();
 
     let result = client.send_raw_request("nonexistent/method", json!({}));
-    assert!(
-        result.is_err(),
-        "Unknown method should return an error"
-    );
+    assert!(result.is_err(), "Unknown method should return an error");
 }
 
 // ============================================================================
@@ -784,9 +759,7 @@ fn e2e_multiple_tool_calls() {
     // Make several tool calls in sequence
     for i in 0..5 {
         let name = format!("User{i}");
-        let result = client
-            .call_tool("greeting", json!({"name": name}))
-            .unwrap();
+        let result = client.call_tool("greeting", json!({"name": name})).unwrap();
         match &result[0] {
             Content::Text { text } => {
                 assert_eq!(text, &format!("Hello, {name}!"));
@@ -806,10 +779,7 @@ fn e2e_mixed_operations() {
     assert!(!tools.is_empty());
 
     let result = client
-        .call_tool(
-            "calculator",
-            json!({"a": 2, "b": 3, "operation": "add"}),
-        )
+        .call_tool("calculator", json!({"a": 2, "b": 3, "operation": "add"}))
         .unwrap();
     match &result[0] {
         Content::Text { text } => assert_eq!(text, "5"),
@@ -947,8 +917,8 @@ fn e2e_empty_server() {
 
 #[test]
 fn e2e_custom_client_info() {
-    let (builder, client_transport, server_transport) = TestServer::builder()
-        .build_server_builder();
+    let (builder, client_transport, server_transport) =
+        TestServer::builder().build_server_builder();
 
     let server = builder.tool(GreetingToolHandler).build();
 
@@ -956,8 +926,7 @@ fn e2e_custom_client_info() {
         server.run_transport(server_transport);
     });
 
-    let mut client = TestClient::new(client_transport)
-        .with_client_info("custom-client", "3.0.0");
+    let mut client = TestClient::new(client_transport).with_client_info("custom-client", "3.0.0");
 
     let init = client.initialize().unwrap();
     // Initialization should succeed with custom client info

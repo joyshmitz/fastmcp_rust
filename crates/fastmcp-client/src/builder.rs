@@ -342,13 +342,7 @@ impl ClientBuilder {
             String::new(),
         );
 
-        Client::from_parts_uninitialized(
-            child,
-            transport,
-            cx.clone(),
-            session,
-            self.timeout_ms,
-        )
+        Client::from_parts_uninitialized(child, transport, cx.clone(), session, self.timeout_ms)
     }
 
     /// Performs the initialization handshake and creates the client.

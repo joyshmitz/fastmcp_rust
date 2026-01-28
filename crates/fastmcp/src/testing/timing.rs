@@ -132,10 +132,7 @@ impl Stopwatch {
     /// Returns the lap with the given name, if it exists.
     #[must_use]
     pub fn get_lap(&self, name: &str) -> Option<Duration> {
-        self.laps
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, d)| *d)
+        self.laps.iter().find(|(n, _)| n == name).map(|(_, d)| *d)
     }
 
     /// Returns the sum of all lap durations.
