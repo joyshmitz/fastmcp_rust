@@ -764,3 +764,999 @@ pub enum StopReason {
     /// Hit max tokens limit.
     MaxTokens,
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // ========================================================================
+    // ServerCapabilities Tests
+    // ========================================================================
+
+    #[test]
+    fn server_capabilities_default_serialization() {
+        let caps = ServerCapabilities::default();
+        let value = serde_json::to_value(&caps).expect("serialize");
+        // All None fields should be omitted
+        assert_eq!(value, json!({}));
+    }
+
+    #[test]
+    fn server_capabilities_full_serialization() {
+        let caps = ServerCapabilities {
+            tools: Some(ToolsCapability { list_changed: true }),
+            resources: Some(ResourcesCapability {
+                subscribe: true,
+                list_changed: true,
+            }),
+            prompts: Some(PromptsCapability { list_changed: true }),
+            logging: Some(LoggingCapability {}),
+            tasks: Some(TasksCapability { list_changed: true }),
+        };
+        let value = serde_json::to_value(&caps).expect("serialize");
+        assert_eq!(value["tools"]["listChanged"], true);
+        assert_eq!(value["resources"]["subscribe"], true);
+        assert_eq!(value["resources"]["listChanged"], true);
+        assert_eq!(value["prompts"]["listChanged"], true);
+        assert!(value.get("logging").is_some());
+        assert_eq!(value["tasks"]["listChanged"], true);
+    }
+
+    #[test]
+    fn server_capabilities_partial_serialization() {
+        let caps = ServerCapabilities {
+            tools: Some(ToolsCapability::default()),
+            ..Default::default()
+        };
+        let value = serde_json::to_value(&caps).expect("serialize");
+        assert!(value.get("tools").is_some());
+        assert!(value.get("resources").is_none());
+        assert!(value.get("prompts").is_none());
+        assert!(value.get("logging").is_none());
+        assert!(value.get("tasks").is_none());
+    }
+
+    #[test]
+    fn server_capabilities_round_trip() {
+        let caps = ServerCapabilities {
+            tools: Some(ToolsCapability { list_changed: true }),
+            resources: Some(ResourcesCapability {
+                subscribe: false,
+                list_changed: true,
+            }),
+            prompts: None,
+            logging: Some(LoggingCapability {}),
+            tasks: None,
+        };
+        let json_str = serde_json::to_string(&caps).expect("serialize");
+        let deserialized: ServerCapabilities =
+            serde_json::from_str(&json_str).expect("deserialize");
+        assert!(deserialized.tools.is_some());
+        assert!(deserialized.tools.as_ref().unwrap().list_changed);
+        assert!(deserialized.resources.is_some());
+        assert!(!deserialized.resources.as_ref().unwrap().subscribe);
+        assert!(deserialized.prompts.is_none());
+        assert!(deserialized.logging.is_some());
+        assert!(deserialized.tasks.is_none());
+    }
+
+    // ========================================================================
+    // ToolsCapability Tests
+    // ========================================================================
+
+    #[test]
+    fn tools_capability_default_omits_false() {
+        let cap = ToolsCapability::default();
+        let value = serde_json::to_value(&cap).expect("serialize");
+        // list_changed defaults to false and should be omitted
+        assert!(value.get("listChanged").is_none());
+    }
+
+    #[test]
+    fn tools_capability_list_changed() {
+        let cap = ToolsCapability { list_changed: true };
+        let value = serde_json::to_value(&cap).expect("serialize");
+        assert_eq!(value["listChanged"], true);
+    }
+
+    // ========================================================================
+    // ResourcesCapability Tests
+    // ========================================================================
+
+    #[test]
+    fn resources_capability_default() {
+        let cap = ResourcesCapability::default();
+        let value = serde_json::to_value(&cap).expect("serialize");
+        assert!(value.get("subscribe").is_none());
+        assert!(value.get("listChanged").is_none());
+    }
+
+    #[test]
+    fn resources_capability_full() {
+        let cap = ResourcesCapability {
+            subscribe: true,
+            list_changed: true,
+        };
+        let value = serde_json::to_value(&cap).expect("serialize");
+        assert_eq!(value["subscribe"], true);
+        assert_eq!(value["listChanged"], true);
+    }
+
+    // ========================================================================
+    // ClientCapabilities Tests
+    // ========================================================================
+
+    #[test]
+    fn client_capabilities_default_serialization() {
+        let caps = ClientCapabilities::default();
+        let value = serde_json::to_value(&caps).expect("serialize");
+        assert_eq!(value, json!({}));
+    }
+
+    #[test]
+    fn client_capabilities_full_serialization() {
+        let caps = ClientCapabilities {
+            sampling: Some(SamplingCapability {}),
+            elicitation: Some(ElicitationCapability::both()),
+            roots: Some(RootsCapability { list_changed: true }),
+        };
+        let value = serde_json::to_value(&caps).expect("serialize");
+        assert!(value.get("sampling").is_some());
+        assert!(value.get("elicitation").is_some());
+        assert_eq!(value["roots"]["listChanged"], true);
+    }
+
+    #[test]
+    fn client_capabilities_round_trip() {
+        let caps = ClientCapabilities {
+            sampling: Some(SamplingCapability {}),
+            elicitation: None,
+            roots: Some(RootsCapability {
+                list_changed: false,
+            }),
+        };
+        let json_str = serde_json::to_string(&caps).expect("serialize");
+        let deserialized: ClientCapabilities =
+            serde_json::from_str(&json_str).expect("deserialize");
+        assert!(deserialized.sampling.is_some());
+        assert!(deserialized.elicitation.is_none());
+        assert!(deserialized.roots.is_some());
+    }
+
+    // ========================================================================
+    // ElicitationCapability Tests
+    // ========================================================================
+
+    #[test]
+    fn elicitation_capability_form_only() {
+        let cap = ElicitationCapability::form();
+        assert!(cap.supports_form());
+        assert!(!cap.supports_url());
+        let value = serde_json::to_value(&cap).expect("serialize");
+        assert!(value.get("form").is_some());
+        assert!(value.get("url").is_none());
+    }
+
+    #[test]
+    fn elicitation_capability_url_only() {
+        let cap = ElicitationCapability::url();
+        assert!(!cap.supports_form());
+        assert!(cap.supports_url());
+    }
+
+    #[test]
+    fn elicitation_capability_both() {
+        let cap = ElicitationCapability::both();
+        assert!(cap.supports_form());
+        assert!(cap.supports_url());
+    }
+
+    // ========================================================================
+    // ServerInfo / ClientInfo Tests
+    // ========================================================================
+
+    #[test]
+    fn server_info_serialization() {
+        let info = ServerInfo {
+            name: "test-server".to_string(),
+            version: "1.0.0".to_string(),
+        };
+        let value = serde_json::to_value(&info).expect("serialize");
+        assert_eq!(value["name"], "test-server");
+        assert_eq!(value["version"], "1.0.0");
+    }
+
+    #[test]
+    fn client_info_serialization() {
+        let info = ClientInfo {
+            name: "test-client".to_string(),
+            version: "0.1.0".to_string(),
+        };
+        let value = serde_json::to_value(&info).expect("serialize");
+        assert_eq!(value["name"], "test-client");
+        assert_eq!(value["version"], "0.1.0");
+    }
+
+    // ========================================================================
+    // Icon Tests
+    // ========================================================================
+
+    #[test]
+    fn icon_new() {
+        let icon = Icon::new("https://example.com/icon.png");
+        assert!(icon.has_src());
+        assert!(!icon.is_data_uri());
+        assert!(icon.mime_type.is_none());
+        assert!(icon.sizes.is_none());
+    }
+
+    #[test]
+    fn icon_with_mime_type() {
+        let icon = Icon::with_mime_type("https://example.com/icon.png", "image/png");
+        assert!(icon.has_src());
+        assert_eq!(icon.mime_type, Some("image/png".to_string()));
+    }
+
+    #[test]
+    fn icon_full() {
+        let icon = Icon::full("https://example.com/icon.png", "image/png", "32x32");
+        assert_eq!(icon.src, Some("https://example.com/icon.png".to_string()));
+        assert_eq!(icon.mime_type, Some("image/png".to_string()));
+        assert_eq!(icon.sizes, Some("32x32".to_string()));
+    }
+
+    #[test]
+    fn icon_data_uri() {
+        let icon = Icon::new("data:image/png;base64,iVBORw0KGgo=");
+        assert!(icon.is_data_uri());
+    }
+
+    #[test]
+    fn icon_default_no_src() {
+        let icon = Icon::default();
+        assert!(!icon.has_src());
+        assert!(!icon.is_data_uri());
+    }
+
+    #[test]
+    fn icon_serialization() {
+        let icon = Icon::full("https://example.com/icon.svg", "image/svg+xml", "16x16 32x32");
+        let value = serde_json::to_value(&icon).expect("serialize");
+        assert_eq!(value["src"], "https://example.com/icon.svg");
+        assert_eq!(value["mimeType"], "image/svg+xml");
+        assert_eq!(value["sizes"], "16x16 32x32");
+    }
+
+    #[test]
+    fn icon_serialization_omits_none_fields() {
+        let icon = Icon::new("https://example.com/icon.png");
+        let value = serde_json::to_value(&icon).expect("serialize");
+        assert!(value.get("src").is_some());
+        assert!(value.get("mimeType").is_none());
+        assert!(value.get("sizes").is_none());
+    }
+
+    #[test]
+    fn icon_equality() {
+        let a = Icon::new("https://example.com/icon.png");
+        let b = Icon::new("https://example.com/icon.png");
+        let c = Icon::new("https://example.com/other.png");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    // ========================================================================
+    // Content Tests
+    // ========================================================================
+
+    #[test]
+    fn content_text_serialization() {
+        let content = Content::Text {
+            text: "Hello, world!".to_string(),
+        };
+        let value = serde_json::to_value(&content).expect("serialize");
+        assert_eq!(value["type"], "text");
+        assert_eq!(value["text"], "Hello, world!");
+    }
+
+    #[test]
+    fn content_image_serialization() {
+        let content = Content::Image {
+            data: "iVBORw0KGgo=".to_string(),
+            mime_type: "image/png".to_string(),
+        };
+        let value = serde_json::to_value(&content).expect("serialize");
+        assert_eq!(value["type"], "image");
+        assert_eq!(value["data"], "iVBORw0KGgo=");
+        assert_eq!(value["mimeType"], "image/png");
+    }
+
+    #[test]
+    fn content_resource_serialization() {
+        let content = Content::Resource {
+            resource: ResourceContent {
+                uri: "file://config.json".to_string(),
+                mime_type: Some("application/json".to_string()),
+                text: Some("{\"key\": \"value\"}".to_string()),
+                blob: None,
+            },
+        };
+        let value = serde_json::to_value(&content).expect("serialize");
+        assert_eq!(value["type"], "resource");
+        assert_eq!(value["resource"]["uri"], "file://config.json");
+        assert_eq!(value["resource"]["mimeType"], "application/json");
+        assert_eq!(value["resource"]["text"], "{\"key\": \"value\"}");
+        assert!(value["resource"].get("blob").is_none());
+    }
+
+    #[test]
+    fn content_text_deserialization() {
+        let json = json!({"type": "text", "text": "Hello!"});
+        let content: Content = serde_json::from_value(json).expect("deserialize");
+        match content {
+            Content::Text { text } => assert_eq!(text, "Hello!"),
+            _ => panic!("Expected text content"),
+        }
+    }
+
+    #[test]
+    fn content_image_deserialization() {
+        let json = json!({"type": "image", "data": "abc123", "mimeType": "image/jpeg"});
+        let content: Content = serde_json::from_value(json).expect("deserialize");
+        match content {
+            Content::Image { data, mime_type } => {
+                assert_eq!(data, "abc123");
+                assert_eq!(mime_type, "image/jpeg");
+            }
+            _ => panic!("Expected image content"),
+        }
+    }
+
+    // ========================================================================
+    // ResourceContent Tests
+    // ========================================================================
+
+    #[test]
+    fn resource_content_text_serialization() {
+        let rc = ResourceContent {
+            uri: "file://readme.md".to_string(),
+            mime_type: Some("text/markdown".to_string()),
+            text: Some("# Hello".to_string()),
+            blob: None,
+        };
+        let value = serde_json::to_value(&rc).expect("serialize");
+        assert_eq!(value["uri"], "file://readme.md");
+        assert_eq!(value["mimeType"], "text/markdown");
+        assert_eq!(value["text"], "# Hello");
+        assert!(value.get("blob").is_none());
+    }
+
+    #[test]
+    fn resource_content_blob_serialization() {
+        let rc = ResourceContent {
+            uri: "file://image.png".to_string(),
+            mime_type: Some("image/png".to_string()),
+            text: None,
+            blob: Some("base64data".to_string()),
+        };
+        let value = serde_json::to_value(&rc).expect("serialize");
+        assert_eq!(value["uri"], "file://image.png");
+        assert!(value.get("text").is_none());
+        assert_eq!(value["blob"], "base64data");
+    }
+
+    #[test]
+    fn resource_content_minimal() {
+        let rc = ResourceContent {
+            uri: "file://test".to_string(),
+            mime_type: None,
+            text: None,
+            blob: None,
+        };
+        let value = serde_json::to_value(&rc).expect("serialize");
+        assert_eq!(value["uri"], "file://test");
+        assert!(value.get("mimeType").is_none());
+        assert!(value.get("text").is_none());
+        assert!(value.get("blob").is_none());
+    }
+
+    // ========================================================================
+    // Role Tests
+    // ========================================================================
+
+    #[test]
+    fn role_serialization() {
+        assert_eq!(serde_json::to_value(Role::User).unwrap(), "user");
+        assert_eq!(serde_json::to_value(Role::Assistant).unwrap(), "assistant");
+    }
+
+    #[test]
+    fn role_deserialization() {
+        let user: Role = serde_json::from_value(json!("user")).expect("deserialize");
+        assert_eq!(user, Role::User);
+        let assistant: Role = serde_json::from_value(json!("assistant")).expect("deserialize");
+        assert_eq!(assistant, Role::Assistant);
+    }
+
+    // ========================================================================
+    // PromptMessage Tests
+    // ========================================================================
+
+    #[test]
+    fn prompt_message_serialization() {
+        let msg = PromptMessage {
+            role: Role::User,
+            content: Content::Text {
+                text: "Tell me a joke".to_string(),
+            },
+        };
+        let value = serde_json::to_value(&msg).expect("serialize");
+        assert_eq!(value["role"], "user");
+        assert_eq!(value["content"]["type"], "text");
+        assert_eq!(value["content"]["text"], "Tell me a joke");
+    }
+
+    #[test]
+    fn prompt_message_assistant() {
+        let msg = PromptMessage {
+            role: Role::Assistant,
+            content: Content::Text {
+                text: "Here's a joke...".to_string(),
+            },
+        };
+        let value = serde_json::to_value(&msg).expect("serialize");
+        assert_eq!(value["role"], "assistant");
+    }
+
+    // ========================================================================
+    // PromptArgument Tests
+    // ========================================================================
+
+    #[test]
+    fn prompt_argument_required() {
+        let arg = PromptArgument {
+            name: "language".to_string(),
+            description: Some("Target language".to_string()),
+            required: true,
+        };
+        let value = serde_json::to_value(&arg).expect("serialize");
+        assert_eq!(value["name"], "language");
+        assert_eq!(value["description"], "Target language");
+        assert_eq!(value["required"], true);
+    }
+
+    #[test]
+    fn prompt_argument_optional_omits_false() {
+        let arg = PromptArgument {
+            name: "style".to_string(),
+            description: None,
+            required: false,
+        };
+        let value = serde_json::to_value(&arg).expect("serialize");
+        assert_eq!(value["name"], "style");
+        assert!(value.get("description").is_none());
+        // required=false should be omitted
+        assert!(value.get("required").is_none());
+    }
+
+    #[test]
+    fn prompt_argument_deserialization_defaults() {
+        let json = json!({"name": "arg1"});
+        let arg: PromptArgument = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(arg.name, "arg1");
+        assert!(arg.description.is_none());
+        assert!(!arg.required);
+    }
+
+    // ========================================================================
+    // Tool Definition Tests
+    // ========================================================================
+
+    #[test]
+    fn tool_minimal_serialization() {
+        let tool = Tool {
+            name: "add".to_string(),
+            description: None,
+            input_schema: json!({"type": "object"}),
+            output_schema: None,
+            icon: None,
+            version: None,
+            tags: vec![],
+            annotations: None,
+        };
+        let value = serde_json::to_value(&tool).expect("serialize");
+        assert_eq!(value["name"], "add");
+        assert_eq!(value["inputSchema"]["type"], "object");
+        assert!(value.get("description").is_none());
+        assert!(value.get("outputSchema").is_none());
+        assert!(value.get("icon").is_none());
+        assert!(value.get("version").is_none());
+        assert!(value.get("tags").is_none());
+        assert!(value.get("annotations").is_none());
+    }
+
+    #[test]
+    fn tool_full_serialization() {
+        let tool = Tool {
+            name: "compute".to_string(),
+            description: Some("Runs a computation".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "x": { "type": "number" } },
+                "required": ["x"]
+            }),
+            output_schema: Some(json!({"type": "number"})),
+            icon: Some(Icon::new("https://example.com/icon.png")),
+            version: Some("2.1.0".to_string()),
+            tags: vec!["math".to_string(), "compute".to_string()],
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        };
+        let value = serde_json::to_value(&tool).expect("serialize");
+        assert_eq!(value["name"], "compute");
+        assert_eq!(value["description"], "Runs a computation");
+        assert!(value["inputSchema"]["properties"]["x"].is_object());
+        assert_eq!(value["outputSchema"]["type"], "number");
+        assert_eq!(value["icon"]["src"], "https://example.com/icon.png");
+        assert_eq!(value["version"], "2.1.0");
+        assert_eq!(value["tags"], json!(["math", "compute"]));
+        assert_eq!(value["annotations"]["readOnly"], true);
+        assert_eq!(value["annotations"]["idempotent"], true);
+    }
+
+    #[test]
+    fn tool_round_trip() {
+        let json = json!({
+            "name": "greet",
+            "description": "Greets the user",
+            "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}},
+            "outputSchema": {"type": "string"},
+            "version": "1.0.0",
+            "tags": ["greeting"],
+            "annotations": {"readOnly": true}
+        });
+        let tool: Tool = serde_json::from_value(json.clone()).expect("deserialize");
+        assert_eq!(tool.name, "greet");
+        assert_eq!(tool.version, Some("1.0.0".to_string()));
+        assert_eq!(tool.tags, vec!["greeting"]);
+        assert!(tool.annotations.unwrap().read_only.unwrap());
+        let re_serialized = serde_json::to_value(&tool).expect("re-serialize");
+        assert_eq!(re_serialized["name"], json["name"]);
+    }
+
+    // ========================================================================
+    // Resource Definition Tests
+    // ========================================================================
+
+    #[test]
+    fn resource_minimal_serialization() {
+        let resource = Resource {
+            uri: "file://test.txt".to_string(),
+            name: "Test File".to_string(),
+            description: None,
+            mime_type: None,
+            icon: None,
+            version: None,
+            tags: vec![],
+        };
+        let value = serde_json::to_value(&resource).expect("serialize");
+        assert_eq!(value["uri"], "file://test.txt");
+        assert_eq!(value["name"], "Test File");
+        assert!(value.get("description").is_none());
+        assert!(value.get("mimeType").is_none());
+    }
+
+    #[test]
+    fn resource_full_round_trip() {
+        let json = json!({
+            "uri": "file://config.json",
+            "name": "Config",
+            "description": "Application configuration",
+            "mimeType": "application/json",
+            "version": "3.0.0",
+            "tags": ["config", "json"]
+        });
+        let resource: Resource = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(resource.uri, "file://config.json");
+        assert_eq!(resource.mime_type, Some("application/json".to_string()));
+        assert_eq!(resource.tags, vec!["config", "json"]);
+    }
+
+    // ========================================================================
+    // ResourceTemplate Tests
+    // ========================================================================
+
+    #[test]
+    fn resource_template_serialization() {
+        let template = ResourceTemplate {
+            uri_template: "file://{path}".to_string(),
+            name: "File Reader".to_string(),
+            description: Some("Read any file".to_string()),
+            mime_type: Some("text/plain".to_string()),
+            icon: None,
+            version: None,
+            tags: vec![],
+        };
+        let value = serde_json::to_value(&template).expect("serialize");
+        assert_eq!(value["uriTemplate"], "file://{path}");
+        assert_eq!(value["name"], "File Reader");
+        assert_eq!(value["description"], "Read any file");
+        assert_eq!(value["mimeType"], "text/plain");
+    }
+
+    // ========================================================================
+    // Prompt Definition Tests
+    // ========================================================================
+
+    #[test]
+    fn prompt_with_arguments() {
+        let prompt = Prompt {
+            name: "translate".to_string(),
+            description: Some("Translate text".to_string()),
+            arguments: vec![
+                PromptArgument {
+                    name: "text".to_string(),
+                    description: Some("Text to translate".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "language".to_string(),
+                    description: Some("Target language".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "style".to_string(),
+                    description: None,
+                    required: false,
+                },
+            ],
+            icon: None,
+            version: None,
+            tags: vec![],
+        };
+        let value = serde_json::to_value(&prompt).expect("serialize");
+        assert_eq!(value["name"], "translate");
+        let args = value["arguments"].as_array().expect("arguments array");
+        assert_eq!(args.len(), 3);
+        assert_eq!(args[0]["name"], "text");
+        assert_eq!(args[0]["required"], true);
+        assert_eq!(args[2]["name"], "style");
+        // required=false should be omitted
+        assert!(args[2].get("required").is_none());
+    }
+
+    #[test]
+    fn prompt_empty_arguments_omitted() {
+        let prompt = Prompt {
+            name: "simple".to_string(),
+            description: None,
+            arguments: vec![],
+            icon: None,
+            version: None,
+            tags: vec![],
+        };
+        let value = serde_json::to_value(&prompt).expect("serialize");
+        assert!(value.get("arguments").is_none());
+    }
+
+    // ========================================================================
+    // TaskId Tests
+    // ========================================================================
+
+    #[test]
+    fn task_id_new_has_prefix() {
+        let id = TaskId::new();
+        assert!(id.as_str().starts_with("task-"));
+    }
+
+    #[test]
+    fn task_id_from_string() {
+        let id = TaskId::from_string("task-abc123");
+        assert_eq!(id.as_str(), "task-abc123");
+    }
+
+    #[test]
+    fn task_id_display() {
+        let id = TaskId::from_string("task-xyz");
+        assert_eq!(format!("{id}"), "task-xyz");
+    }
+
+    #[test]
+    fn task_id_from_impls() {
+        let from_string: TaskId = "my-task".to_string().into();
+        assert_eq!(from_string.as_str(), "my-task");
+
+        let from_str: TaskId = "another-task".into();
+        assert_eq!(from_str.as_str(), "another-task");
+    }
+
+    #[test]
+    fn task_id_serialization() {
+        let id = TaskId::from_string("task-1");
+        let value = serde_json::to_value(&id).expect("serialize");
+        assert_eq!(value, "task-1");
+
+        let deserialized: TaskId = serde_json::from_value(json!("task-2")).expect("deserialize");
+        assert_eq!(deserialized.as_str(), "task-2");
+    }
+
+    #[test]
+    fn task_id_equality() {
+        let a = TaskId::from_string("task-1");
+        let b = TaskId::from_string("task-1");
+        let c = TaskId::from_string("task-2");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    // ========================================================================
+    // TaskStatus Tests
+    // ========================================================================
+
+    #[test]
+    fn task_status_is_terminal() {
+        assert!(TaskStatus::Completed.is_terminal());
+        assert!(TaskStatus::Failed.is_terminal());
+        assert!(TaskStatus::Cancelled.is_terminal());
+        assert!(!TaskStatus::Pending.is_terminal());
+        assert!(!TaskStatus::Running.is_terminal());
+    }
+
+    #[test]
+    fn task_status_is_active() {
+        assert!(TaskStatus::Pending.is_active());
+        assert!(TaskStatus::Running.is_active());
+        assert!(!TaskStatus::Completed.is_active());
+        assert!(!TaskStatus::Failed.is_active());
+        assert!(!TaskStatus::Cancelled.is_active());
+    }
+
+    #[test]
+    fn task_status_serialization() {
+        assert_eq!(serde_json::to_value(TaskStatus::Pending).unwrap(), "pending");
+        assert_eq!(serde_json::to_value(TaskStatus::Running).unwrap(), "running");
+        assert_eq!(
+            serde_json::to_value(TaskStatus::Completed).unwrap(),
+            "completed"
+        );
+        assert_eq!(serde_json::to_value(TaskStatus::Failed).unwrap(), "failed");
+        assert_eq!(
+            serde_json::to_value(TaskStatus::Cancelled).unwrap(),
+            "cancelled"
+        );
+    }
+
+    #[test]
+    fn task_status_deserialization() {
+        assert_eq!(
+            serde_json::from_value::<TaskStatus>(json!("pending")).unwrap(),
+            TaskStatus::Pending
+        );
+        assert_eq!(
+            serde_json::from_value::<TaskStatus>(json!("running")).unwrap(),
+            TaskStatus::Running
+        );
+        assert_eq!(
+            serde_json::from_value::<TaskStatus>(json!("completed")).unwrap(),
+            TaskStatus::Completed
+        );
+        assert_eq!(
+            serde_json::from_value::<TaskStatus>(json!("failed")).unwrap(),
+            TaskStatus::Failed
+        );
+        assert_eq!(
+            serde_json::from_value::<TaskStatus>(json!("cancelled")).unwrap(),
+            TaskStatus::Cancelled
+        );
+    }
+
+    // ========================================================================
+    // TaskInfo Tests
+    // ========================================================================
+
+    #[test]
+    fn task_info_serialization() {
+        let info = TaskInfo {
+            id: TaskId::from_string("task-1"),
+            task_type: "compute".to_string(),
+            status: TaskStatus::Running,
+            progress: Some(0.5),
+            message: Some("Processing...".to_string()),
+            created_at: "2026-01-28T00:00:00Z".to_string(),
+            started_at: Some("2026-01-28T00:01:00Z".to_string()),
+            completed_at: None,
+            error: None,
+        };
+        let value = serde_json::to_value(&info).expect("serialize");
+        assert_eq!(value["id"], "task-1");
+        assert_eq!(value["taskType"], "compute");
+        assert_eq!(value["status"], "running");
+        assert_eq!(value["progress"], 0.5);
+        assert_eq!(value["message"], "Processing...");
+        assert_eq!(value["createdAt"], "2026-01-28T00:00:00Z");
+        assert_eq!(value["startedAt"], "2026-01-28T00:01:00Z");
+        assert!(value.get("completedAt").is_none());
+        assert!(value.get("error").is_none());
+    }
+
+    #[test]
+    fn task_info_minimal() {
+        let json = json!({
+            "id": "task-2",
+            "taskType": "demo",
+            "status": "pending",
+            "createdAt": "2026-01-28T00:00:00Z"
+        });
+        let info: TaskInfo = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(info.id.as_str(), "task-2");
+        assert_eq!(info.status, TaskStatus::Pending);
+        assert!(info.progress.is_none());
+        assert!(info.message.is_none());
+    }
+
+    // ========================================================================
+    // TaskResult Tests
+    // ========================================================================
+
+    #[test]
+    fn task_result_success() {
+        let result = TaskResult {
+            id: TaskId::from_string("task-1"),
+            success: true,
+            data: Some(json!({"value": 42})),
+            error: None,
+        };
+        let value = serde_json::to_value(&result).expect("serialize");
+        assert_eq!(value["id"], "task-1");
+        assert_eq!(value["success"], true);
+        assert_eq!(value["data"]["value"], 42);
+        assert!(value.get("error").is_none());
+    }
+
+    #[test]
+    fn task_result_failure() {
+        let result = TaskResult {
+            id: TaskId::from_string("task-2"),
+            success: false,
+            data: None,
+            error: Some("computation failed".to_string()),
+        };
+        let value = serde_json::to_value(&result).expect("serialize");
+        assert_eq!(value["success"], false);
+        assert!(value.get("data").is_none());
+        assert_eq!(value["error"], "computation failed");
+    }
+
+    // ========================================================================
+    // SamplingContent Tests
+    // ========================================================================
+
+    #[test]
+    fn sampling_content_text_serialization() {
+        let content = SamplingContent::Text {
+            text: "Hello".to_string(),
+        };
+        let value = serde_json::to_value(&content).expect("serialize");
+        assert_eq!(value["type"], "text");
+        assert_eq!(value["text"], "Hello");
+    }
+
+    #[test]
+    fn sampling_content_image_serialization() {
+        let content = SamplingContent::Image {
+            data: "base64data".to_string(),
+            mime_type: "image/png".to_string(),
+        };
+        let value = serde_json::to_value(&content).expect("serialize");
+        assert_eq!(value["type"], "image");
+        assert_eq!(value["data"], "base64data");
+        assert_eq!(value["mimeType"], "image/png");
+    }
+
+    // ========================================================================
+    // SamplingMessage Tests
+    // ========================================================================
+
+    #[test]
+    fn sampling_message_user_constructor() {
+        let msg = SamplingMessage::user("Hello!");
+        let value = serde_json::to_value(&msg).expect("serialize");
+        assert_eq!(value["role"], "user");
+        assert_eq!(value["content"]["type"], "text");
+        assert_eq!(value["content"]["text"], "Hello!");
+    }
+
+    #[test]
+    fn sampling_message_assistant_constructor() {
+        let msg = SamplingMessage::assistant("Hi there!");
+        let value = serde_json::to_value(&msg).expect("serialize");
+        assert_eq!(value["role"], "assistant");
+        assert_eq!(value["content"]["text"], "Hi there!");
+    }
+
+    // ========================================================================
+    // ModelPreferences Tests
+    // ========================================================================
+
+    #[test]
+    fn model_preferences_default() {
+        let prefs = ModelPreferences::default();
+        let value = serde_json::to_value(&prefs).expect("serialize");
+        // All optional fields should be omitted
+        assert!(value.get("hints").is_none());
+        assert!(value.get("costPriority").is_none());
+        assert!(value.get("speedPriority").is_none());
+        assert!(value.get("intelligencePriority").is_none());
+    }
+
+    #[test]
+    fn model_preferences_full() {
+        let prefs = ModelPreferences {
+            hints: vec![ModelHint {
+                name: Some("claude-3".to_string()),
+            }],
+            cost_priority: Some(0.3),
+            speed_priority: Some(0.5),
+            intelligence_priority: Some(0.9),
+        };
+        let value = serde_json::to_value(&prefs).expect("serialize");
+        assert_eq!(value["hints"][0]["name"], "claude-3");
+        assert_eq!(value["costPriority"], 0.3);
+        assert_eq!(value["speedPriority"], 0.5);
+        assert_eq!(value["intelligencePriority"], 0.9);
+    }
+
+    // ========================================================================
+    // StopReason Tests
+    // ========================================================================
+
+    #[test]
+    fn stop_reason_serialization() {
+        assert_eq!(
+            serde_json::to_value(StopReason::EndTurn).unwrap(),
+            "endTurn"
+        );
+        assert_eq!(
+            serde_json::to_value(StopReason::StopSequence).unwrap(),
+            "stopSequence"
+        );
+        assert_eq!(
+            serde_json::to_value(StopReason::MaxTokens).unwrap(),
+            "maxTokens"
+        );
+    }
+
+    #[test]
+    fn stop_reason_deserialization() {
+        assert_eq!(
+            serde_json::from_value::<StopReason>(json!("endTurn")).unwrap(),
+            StopReason::EndTurn
+        );
+        assert_eq!(
+            serde_json::from_value::<StopReason>(json!("stopSequence")).unwrap(),
+            StopReason::StopSequence
+        );
+        assert_eq!(
+            serde_json::from_value::<StopReason>(json!("maxTokens")).unwrap(),
+            StopReason::MaxTokens
+        );
+    }
+
+    #[test]
+    fn stop_reason_default() {
+        assert_eq!(StopReason::default(), StopReason::EndTurn);
+    }
+
+    // ========================================================================
+    // PROTOCOL_VERSION Test
+    // ========================================================================
+
+    #[test]
+    fn protocol_version_value() {
+        assert_eq!(PROTOCOL_VERSION, "2024-11-05");
+    }
+}

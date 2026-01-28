@@ -7,6 +7,7 @@
 //! - [`TestClient`]: Client for in-process testing with MemoryTransport
 //! - Assertion helpers for validating JSON-RPC and MCP compliance
 //! - Timing utilities for performance measurements
+//! - [`fixtures`]: Test data generators for tools, resources, prompts, and messages
 //!
 //! # Example
 //!
@@ -41,6 +42,7 @@
 mod assertions;
 mod client;
 mod context;
+pub mod fixtures;
 mod server;
 mod timing;
 mod trace;
