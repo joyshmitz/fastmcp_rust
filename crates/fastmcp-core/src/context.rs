@@ -367,28 +367,19 @@ impl ElicitationResponse {
     /// Gets a string value from the form content.
     #[must_use]
     pub fn get_string(&self, key: &str) -> Option<&str> {
-        self.content
-            .as_ref()?
-            .get(key)?
-            .as_str()
+        self.content.as_ref()?.get(key)?.as_str()
     }
 
     /// Gets a boolean value from the form content.
     #[must_use]
     pub fn get_bool(&self, key: &str) -> Option<bool> {
-        self.content
-            .as_ref()?
-            .get(key)?
-            .as_bool()
+        self.content.as_ref()?.get(key)?.as_bool()
     }
 
     /// Gets an integer value from the form content.
     #[must_use]
     pub fn get_int(&self, key: &str) -> Option<i64> {
-        self.content
-            .as_ref()?
-            .get(key)?
-            .as_i64()
+        self.content.as_ref()?.get(key)?.as_i64()
     }
 }
 

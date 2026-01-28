@@ -165,6 +165,77 @@ impl McpError {
     pub fn request_cancelled() -> Self {
         Self::new(McpErrorCode::RequestCancelled, "Request was cancelled")
     }
+
+    /// Returns a masked version of this error for client responses.
+    ///
+    /// When masking is enabled, internal error details are hidden to prevent
+    /// leaking sensitive information (file paths, stack traces, internal state).
+    ///
+    /// # What gets masked
+    ///
+    /// - `InternalError`, `ToolExecutionError`, `Custom` codes: message replaced
+    ///   with "Internal server error" and data removed
+    ///
+    /// # What's preserved
+    ///
+    /// - Error code (for programmatic handling)
+    /// - Client errors (`ParseError`, `InvalidRequest`, `MethodNotFound`,
+    ///   `InvalidParams`, `ResourceNotFound`, `ResourceForbidden`, `PromptNotFound`,
+    ///   `RequestCancelled`): preserved as-is since they don't contain internal details
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fastmcp_core::{McpError, McpErrorCode};
+    ///
+    /// let internal = McpError::internal_error("Connection failed at /etc/secrets/db.conf");
+    /// let masked = internal.masked(true);
+    /// assert_eq!(masked.message, "Internal server error");
+    /// assert!(masked.data.is_none());
+    ///
+    /// // Client errors are preserved
+    /// let client = McpError::invalid_params("Missing field 'name'");
+    /// let masked_client = client.masked(true);
+    /// assert!(masked_client.message.contains("name"));
+    /// ```
+    #[must_use]
+    pub fn masked(&self, mask_enabled: bool) -> McpError {
+        if !mask_enabled {
+            return self.clone();
+        }
+
+        match self.code {
+            // Client errors are preserved - they don't contain internal details
+            McpErrorCode::ParseError
+            | McpErrorCode::InvalidRequest
+            | McpErrorCode::MethodNotFound
+            | McpErrorCode::InvalidParams
+            | McpErrorCode::ResourceNotFound
+            | McpErrorCode::ResourceForbidden
+            | McpErrorCode::PromptNotFound
+            | McpErrorCode::RequestCancelled => self.clone(),
+
+            // Internal errors are masked
+            McpErrorCode::InternalError
+            | McpErrorCode::ToolExecutionError
+            | McpErrorCode::Custom(_) => McpError {
+                code: self.code,
+                message: "Internal server error".to_string(),
+                data: None,
+            },
+        }
+    }
+
+    /// Returns whether this error contains internal details that should be masked.
+    #[must_use]
+    pub fn is_internal(&self) -> bool {
+        matches!(
+            self.code,
+            McpErrorCode::InternalError
+                | McpErrorCode::ToolExecutionError
+                | McpErrorCode::Custom(_)
+        )
+    }
 }
 
 impl std::fmt::Display for McpError {
@@ -493,5 +564,94 @@ mod tests {
     fn test_helper_cancelled() {
         let outcome: Outcome<i32, McpError> = cancelled();
         assert!(matches!(outcome, Outcome::Cancelled(_)));
+    }
+
+    // ========================================
+    // Error masking tests
+    // ========================================
+
+    #[test]
+    fn test_masked_preserves_client_errors() {
+        // Client errors should be preserved
+        let parse = McpError::parse_error("invalid json");
+        let masked = parse.masked(true);
+        assert_eq!(masked.message, "invalid json");
+
+        let invalid = McpError::invalid_request("bad request");
+        let masked = invalid.masked(true);
+        assert!(masked.message.contains("bad request"));
+
+        let method = McpError::method_not_found("unknown");
+        let masked = method.masked(true);
+        assert!(masked.message.contains("unknown"));
+
+        let params = McpError::invalid_params("missing field");
+        let masked = params.masked(true);
+        assert!(masked.message.contains("missing field"));
+
+        let resource = McpError::resource_not_found("file://test");
+        let masked = resource.masked(true);
+        assert!(masked.message.contains("file://test"));
+
+        let cancelled = McpError::request_cancelled();
+        let masked = cancelled.masked(true);
+        assert!(masked.message.contains("cancelled"));
+    }
+
+    #[test]
+    fn test_masked_hides_internal_errors() {
+        // Internal errors should be masked
+        let internal = McpError::internal_error("Connection failed at /etc/secrets/db.conf");
+        let masked = internal.masked(true);
+        assert_eq!(masked.message, "Internal server error");
+        assert!(masked.data.is_none());
+        assert_eq!(masked.code, McpErrorCode::InternalError);
+
+        let tool = McpError::tool_error("Failed: /home/user/secret.txt");
+        let masked = tool.masked(true);
+        assert_eq!(masked.message, "Internal server error");
+        assert!(masked.data.is_none());
+
+        let custom = McpError::new(McpErrorCode::Custom(-99999), "Stack trace: ...");
+        let masked = custom.masked(true);
+        assert_eq!(masked.message, "Internal server error");
+    }
+
+    #[test]
+    fn test_masked_with_data_removed() {
+        let data = serde_json::json!({"internal": "secret", "path": "/etc/passwd"});
+        let internal = McpError::with_data(McpErrorCode::InternalError, "Failure", data);
+
+        // With masking enabled
+        let masked = internal.masked(true);
+        assert_eq!(masked.message, "Internal server error");
+        assert!(masked.data.is_none());
+
+        // With masking disabled
+        let unmasked = internal.masked(false);
+        assert_eq!(unmasked.message, "Failure");
+        assert!(unmasked.data.is_some());
+    }
+
+    #[test]
+    fn test_masked_disabled() {
+        // When masking is disabled, all errors should be preserved
+        let internal = McpError::internal_error("Full details here");
+        let masked = internal.masked(false);
+        assert_eq!(masked.message, "Full details here");
+    }
+
+    #[test]
+    fn test_is_internal() {
+        assert!(McpError::internal_error("test").is_internal());
+        assert!(McpError::tool_error("test").is_internal());
+        assert!(McpError::new(McpErrorCode::Custom(-99999), "test").is_internal());
+
+        assert!(!McpError::parse_error("test").is_internal());
+        assert!(!McpError::invalid_request("test").is_internal());
+        assert!(!McpError::method_not_found("test").is_internal());
+        assert!(!McpError::invalid_params("test").is_internal());
+        assert!(!McpError::resource_not_found("test").is_internal());
+        assert!(!McpError::request_cancelled().is_internal());
     }
 }

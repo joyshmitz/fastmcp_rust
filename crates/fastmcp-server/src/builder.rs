@@ -31,6 +31,8 @@ pub struct ServerBuilder {
     request_timeout_secs: u64,
     /// Whether to enable statistics collection.
     stats_enabled: bool,
+    /// Whether to mask internal error details in responses.
+    mask_error_details: bool,
     /// Logging configuration.
     logging: LoggingConfig,
     /// Console configuration for rich output.
@@ -68,6 +70,7 @@ impl ServerBuilder {
             instructions: None,
             request_timeout_secs: DEFAULT_REQUEST_TIMEOUT_SECS,
             stats_enabled: true,
+            mask_error_details: false, // Disabled by default for development
             logging: LoggingConfig::from_env(),
             console_config: ConsoleConfig::from_env(),
             lifespan: LifespanHooks::default(),
@@ -104,6 +107,85 @@ impl ServerBuilder {
     pub fn request_timeout(mut self, secs: u64) -> Self {
         self.request_timeout_secs = secs;
         self
+    }
+
+    /// Enables or disables error detail masking.
+    ///
+    /// When enabled, internal error details are hidden from client responses:
+    /// - Stack traces removed
+    /// - File paths sanitized
+    /// - Internal state not exposed
+    /// - Generic "Internal server error" message returned
+    ///
+    /// Client errors (invalid request, method not found, etc.) are preserved
+    /// since they don't contain sensitive internal details.
+    ///
+    /// Default is `false` (disabled) for development convenience.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let server = Server::new("api", "1.0")
+    ///     .mask_error_details(true)  // Always mask in production
+    ///     .build();
+    /// ```
+    #[must_use]
+    pub fn mask_error_details(mut self, enabled: bool) -> Self {
+        self.mask_error_details = enabled;
+        self
+    }
+
+    /// Automatically masks error details based on environment.
+    ///
+    /// Masking is enabled when:
+    /// - `FASTMCP_ENV` is set to "production"
+    /// - `FASTMCP_MASK_ERRORS` is set to "true" or "1"
+    /// - The build is a release build (`cfg!(not(debug_assertions))`)
+    ///
+    /// Masking is explicitly disabled when:
+    /// - `FASTMCP_MASK_ERRORS` is set to "false" or "0"
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let server = Server::new("api", "1.0")
+    ///     .auto_mask_errors()
+    ///     .build();
+    /// ```
+    #[must_use]
+    pub fn auto_mask_errors(mut self) -> Self {
+        // Check for explicit override first
+        if let Ok(val) = std::env::var("FASTMCP_MASK_ERRORS") {
+            match val.to_lowercase().as_str() {
+                "true" | "1" | "yes" => {
+                    self.mask_error_details = true;
+                    return self;
+                }
+                "false" | "0" | "no" => {
+                    self.mask_error_details = false;
+                    return self;
+                }
+                _ => {} // Fall through to other checks
+            }
+        }
+
+        // Check for production environment
+        if let Ok(env) = std::env::var("FASTMCP_ENV") {
+            if env.to_lowercase() == "production" {
+                self.mask_error_details = true;
+                return self;
+            }
+        }
+
+        // Default: mask in release builds, don't mask in debug builds
+        self.mask_error_details = cfg!(not(debug_assertions));
+        self
+    }
+
+    /// Returns whether error masking is enabled.
+    #[must_use]
+    pub fn is_error_masking_enabled(&self) -> bool {
+        self.mask_error_details
     }
 
     /// Registers a middleware.
@@ -434,6 +516,7 @@ impl ServerBuilder {
             } else {
                 None
             },
+            mask_error_details: self.mask_error_details,
             logging: self.logging,
             console_config: self.console_config,
             lifespan: Mutex::new(Some(self.lifespan)),

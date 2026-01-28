@@ -223,6 +223,8 @@ pub struct Server {
     request_timeout_secs: u64,
     /// Runtime statistics collector (None = disabled).
     stats: Option<ServerStats>,
+    /// Whether to mask internal error details in responses.
+    mask_error_details: bool,
     /// Logging configuration.
     logging: LoggingConfig,
     /// Console configuration for rich output.
@@ -801,14 +803,28 @@ impl Server {
 
         match result {
             Ok(value) => Some(JsonRpcResponse::success(response_id, value)),
-            Err(e) => Some(JsonRpcResponse::error(
-                id,
-                JsonRpcError {
-                    code: e.code.into(),
-                    message: e.message,
-                    data: e.data,
-                },
-            )),
+            Err(e) => {
+                // Log full error before masking if this is an internal error
+                if self.mask_error_details && e.is_internal() {
+                    fastmcp_core::logging::error!(
+                        target: targets::HANDLER,
+                        "Request '{}' failed (masked in response): {}",
+                        method,
+                        e
+                    );
+                }
+
+                // Apply masking if enabled
+                let masked = e.masked(self.mask_error_details);
+                Some(JsonRpcResponse::error(
+                    id,
+                    JsonRpcError {
+                        code: masked.code.into(),
+                        message: masked.message,
+                        data: masked.data,
+                    },
+                ))
+            }
         }
     }
 
