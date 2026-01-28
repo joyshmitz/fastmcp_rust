@@ -4,6 +4,7 @@
 //! - `run` - Run an MCP server
 //! - `inspect` - Inspect a server's capabilities
 //! - `install` - Install server config for Claude Desktop etc.
+//! - `tasks` - Manage background tasks on MCP servers
 
 #![forbid(unsafe_code)]
 
@@ -19,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use fastmcp_client::Client;
 use fastmcp_console::rich_rust::prelude::*;
 use fastmcp_core::McpResult;
+use fastmcp_protocol::TaskStatus;
 
 /// FastMCP CLI - Run, inspect, and install MCP servers.
 #[derive(Parser)]
@@ -107,6 +109,138 @@ enum Commands {
         #[arg(long, short = 't')]
         target: Option<InstallTarget>,
     },
+
+    /// Manage background tasks on an MCP server.
+    ///
+    /// Query task status, retry failed tasks, cancel pending tasks, and view queue statistics.
+    ///
+    /// Example: fastmcp tasks list ./my-server -- --config config.json
+    Tasks {
+        /// Task subcommand.
+        #[command(subcommand)]
+        action: TasksAction,
+    },
+}
+
+/// Subcommands for task management.
+#[derive(Subcommand)]
+enum TasksAction {
+    /// List tasks with optional status filter.
+    ///
+    /// Example: fastmcp tasks list ./my-server -- --config config.json
+    List {
+        /// Server command or path.
+        server: String,
+
+        /// Arguments to pass to the server (after --).
+        #[arg(last = true)]
+        args: Vec<String>,
+
+        /// Filter by status (pending, running, completed, failed, cancelled).
+        #[arg(long, short = 's')]
+        status: Option<TaskStatusFilter>,
+
+        /// Maximum number of tasks to show.
+        #[arg(long, short = 'n', default_value = "20")]
+        limit: usize,
+
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Show details of a specific task.
+    ///
+    /// Example: fastmcp tasks show ./my-server task-00000001
+    Show {
+        /// Server command or path.
+        server: String,
+
+        /// Task ID.
+        task_id: String,
+
+        /// Arguments to pass to the server (after --).
+        #[arg(last = true)]
+        args: Vec<String>,
+
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Cancel a pending or running task.
+    ///
+    /// Example: fastmcp tasks cancel ./my-server task-00000001 -r "no longer needed"
+    Cancel {
+        /// Server command or path.
+        server: String,
+
+        /// Task ID to cancel.
+        task_id: String,
+
+        /// Arguments to pass to the server (after --).
+        #[arg(last = true)]
+        args: Vec<String>,
+
+        /// Reason for cancellation.
+        #[arg(long, short = 'r')]
+        reason: Option<String>,
+    },
+
+    /// Show task queue statistics.
+    ///
+    /// Example: fastmcp tasks stats ./my-server
+    Stats {
+        /// Server command or path.
+        server: String,
+
+        /// Arguments to pass to the server (after --).
+        #[arg(last = true)]
+        args: Vec<String>,
+
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// Task status filter for CLI.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TaskStatusFilter {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl std::str::FromStr for TaskStatusFilter {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "pending" => Ok(Self::Pending),
+            "running" => Ok(Self::Running),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            "cancelled" | "canceled" => Ok(Self::Cancelled),
+            _ => Err(format!(
+                "Unknown status: {s}. Expected: pending, running, completed, failed, cancelled"
+            )),
+        }
+    }
+}
+
+impl From<TaskStatusFilter> for TaskStatus {
+    fn from(filter: TaskStatusFilter) -> Self {
+        match filter {
+            TaskStatusFilter::Pending => TaskStatus::Pending,
+            TaskStatusFilter::Running => TaskStatus::Running,
+            TaskStatusFilter::Completed => TaskStatus::Completed,
+            TaskStatusFilter::Failed => TaskStatus::Failed,
+            TaskStatusFilter::Cancelled => TaskStatus::Cancelled,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,6 +309,7 @@ fn main() -> ExitCode {
             dry_run,
         } => cmd_install(&name, &server, &args, target, dry_run),
         Commands::List { target } => cmd_list(target),
+        Commands::Tasks { action } => cmd_tasks(action),
     };
 
     match result {
@@ -236,7 +371,8 @@ fn cmd_run(
 
 /// List command: List configured MCP servers.
 fn cmd_list(target: Option<InstallTarget>) -> McpResult<()> {
-    use rich_rust::r#box::ROUNDED;
+    use fastmcp_console::rich_rust::r#box::ROUNDED;
+    use fastmcp_console::rich_rust::style::Style;
 
     let targets = if let Some(t) = target {
         vec![t]
@@ -249,8 +385,8 @@ fn cmd_list(target: Option<InstallTarget>) -> McpResult<()> {
         .box_style(&ROUNDED)
         .show_header(true);
 
-    table.add_column(Column::new("Client").style("bold cyan"));
-    table.add_column(Column::new("Server Name").style("bold yellow"));
+    table.add_column(Column::new("Client").style(Style::parse("bold cyan").unwrap_or_default()));
+    table.add_column(Column::new("Server Name").style(Style::parse("bold yellow").unwrap_or_default()));
     table.add_column(Column::new("Command"));
     table.add_column(Column::new("Arguments"));
     table.add_column(Column::new("Environment"));
@@ -326,6 +462,272 @@ fn cmd_list(target: Option<InstallTarget>) -> McpResult<()> {
     }
 
     Ok(())
+}
+
+/// Tasks command: Manage background tasks on an MCP server.
+fn cmd_tasks(action: TasksAction) -> McpResult<()> {
+    match action {
+        TasksAction::List {
+            server,
+            args,
+            status,
+            limit,
+            json,
+        } => {
+            let args_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let mut client = Client::stdio(&server, &args_refs)?;
+            let result = cmd_tasks_list(&mut client, status, limit, json);
+            client.close();
+            result
+        }
+        TasksAction::Show {
+            server,
+            task_id,
+            args,
+            json,
+        } => {
+            let args_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let mut client = Client::stdio(&server, &args_refs)?;
+            let result = cmd_tasks_show(&mut client, &task_id, json);
+            client.close();
+            result
+        }
+        TasksAction::Cancel {
+            server,
+            task_id,
+            args,
+            reason,
+        } => {
+            let args_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let mut client = Client::stdio(&server, &args_refs)?;
+            let result = cmd_tasks_cancel(&mut client, &task_id, reason.as_deref());
+            client.close();
+            result
+        }
+        TasksAction::Stats { server, args, json } => {
+            let args_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let mut client = Client::stdio(&server, &args_refs)?;
+            let result = cmd_tasks_stats(&mut client, json);
+            client.close();
+            result
+        }
+    }
+}
+
+/// List tasks with optional status filter.
+fn cmd_tasks_list(
+    client: &mut Client,
+    status: Option<TaskStatusFilter>,
+    limit: usize,
+    json_output: bool,
+) -> McpResult<()> {
+    use fastmcp_console::rich_rust::r#box::ROUNDED;
+    use fastmcp_console::rich_rust::style::Style;
+
+    let status_filter = status.map(TaskStatus::from);
+    let result = client.list_tasks(status_filter, None)?;
+    let mut tasks = result.tasks;
+
+    // Apply limit
+    tasks.truncate(limit);
+
+    if json_output {
+        let output = serde_json::to_string_pretty(&tasks).map_err(|e| {
+            fastmcp_core::McpError::internal_error(format!("JSON serialization error: {e}"))
+        })?;
+        println!("{output}");
+        return Ok(());
+    }
+
+    if tasks.is_empty() {
+        println!("No tasks found.");
+        return Ok(());
+    }
+
+    let mut table = Table::new()
+        .title("Background Tasks")
+        .box_style(&ROUNDED)
+        .show_header(true);
+
+    table.add_column(Column::new("ID").style(Style::parse("bold cyan").unwrap_or_default()));
+    table.add_column(Column::new("Type").style(Style::parse("yellow").unwrap_or_default()));
+    table.add_column(Column::new("Status").style(Style::parse("bold").unwrap_or_default()));
+    table.add_column(Column::new("Progress"));
+    table.add_column(Column::new("Created"));
+    table.add_column(Column::new("Message"));
+
+    for task in &tasks {
+        let status_str = format_task_status(task.status);
+        let progress = task
+            .progress
+            .map(|p| format!("{:.0}%", p * 100.0))
+            .unwrap_or_else(|| "-".to_string());
+        let created = format_timestamp(&task.created_at);
+        let message = task.message.as_deref().unwrap_or("-");
+
+        table.add_row_cells([
+            task.id.to_string().as_str(),
+            &task.task_type,
+            &status_str,
+            &progress,
+            &created,
+            message,
+        ]);
+    }
+
+    fastmcp_console::console().render(&table);
+
+    if result.next_cursor.is_some() {
+        println!("\n(More tasks available, use --limit to see more)");
+    }
+
+    Ok(())
+}
+
+/// Show details of a specific task.
+fn cmd_tasks_show(client: &mut Client, task_id: &str, json_output: bool) -> McpResult<()> {
+    let result = client.get_task(task_id)?;
+
+    if json_output {
+        let output = serde_json::to_string_pretty(&result).map_err(|e| {
+            fastmcp_core::McpError::internal_error(format!("JSON serialization error: {e}"))
+        })?;
+        println!("{output}");
+        return Ok(());
+    }
+
+    let task = &result.task;
+    println!("Task: {}", task.id);
+    println!("Type: {}", task.task_type);
+    println!("Status: {}", format_task_status(task.status));
+
+    if let Some(progress) = task.progress {
+        println!("Progress: {:.0}%", progress * 100.0);
+    }
+
+    if let Some(message) = &task.message {
+        println!("Message: {message}");
+    }
+
+    println!("Created: {}", format_timestamp(&task.created_at));
+
+    if let Some(started) = &task.started_at {
+        println!("Started: {}", format_timestamp(started));
+    }
+
+    if let Some(completed) = &task.completed_at {
+        println!("Completed: {}", format_timestamp(completed));
+    }
+
+    if let Some(error) = &task.error {
+        println!("Error: {error}");
+    }
+
+    if let Some(task_result) = &result.result {
+        println!("\nResult:");
+        println!("  Success: {}", task_result.success);
+        if let Some(data) = &task_result.data {
+            if let Ok(pretty) = serde_json::to_string_pretty(data) {
+                for line in pretty.lines() {
+                    println!("  {line}");
+                }
+            }
+        }
+        if let Some(err) = &task_result.error {
+            println!("  Error: {err}");
+        }
+    }
+
+    Ok(())
+}
+
+/// Cancel a pending or running task.
+fn cmd_tasks_cancel(client: &mut Client, task_id: &str, reason: Option<&str>) -> McpResult<()> {
+    let task = if let Some(r) = reason {
+        client.cancel_task_with_reason(task_id, Some(r))?
+    } else {
+        client.cancel_task(task_id)?
+    };
+
+    println!("Task {} cancelled.", task.id);
+    println!("Status: {}", format_task_status(task.status));
+
+    Ok(())
+}
+
+/// Show task queue statistics.
+fn cmd_tasks_stats(client: &mut Client, json_output: bool) -> McpResult<()> {
+    // Get all tasks to compute statistics
+    let all_tasks = client.list_tasks(None, None)?;
+
+    let mut pending = 0;
+    let mut running = 0;
+    let mut completed = 0;
+    let mut failed = 0;
+    let mut cancelled = 0;
+
+    for task in &all_tasks.tasks {
+        match task.status {
+            TaskStatus::Pending => pending += 1,
+            TaskStatus::Running => running += 1,
+            TaskStatus::Completed => completed += 1,
+            TaskStatus::Failed => failed += 1,
+            TaskStatus::Cancelled => cancelled += 1,
+        }
+    }
+
+    let total = all_tasks.tasks.len();
+    let active = pending + running;
+
+    if json_output {
+        let stats = serde_json::json!({
+            "total": total,
+            "active": active,
+            "pending": pending,
+            "running": running,
+            "completed": completed,
+            "failed": failed,
+            "cancelled": cancelled,
+        });
+        let output = serde_json::to_string_pretty(&stats).map_err(|e| {
+            fastmcp_core::McpError::internal_error(format!("JSON serialization error: {e}"))
+        })?;
+        println!("{output}");
+        return Ok(());
+    }
+
+    println!("Task Queue Statistics");
+    println!("=====================");
+    println!("Total:     {total}");
+    println!("Active:    {active}");
+    println!("  Pending:   {pending}");
+    println!("  Running:   {running}");
+    println!("Completed: {completed}");
+    println!("Failed:    {failed}");
+    println!("Cancelled: {cancelled}");
+
+    Ok(())
+}
+
+/// Format a task status for display.
+fn format_task_status(status: TaskStatus) -> String {
+    match status {
+        TaskStatus::Pending => "⏳ Pending".to_string(),
+        TaskStatus::Running => "🔄 Running".to_string(),
+        TaskStatus::Completed => "✅ Completed".to_string(),
+        TaskStatus::Failed => "❌ Failed".to_string(),
+        TaskStatus::Cancelled => "🚫 Cancelled".to_string(),
+    }
+}
+
+/// Format a timestamp for display.
+fn format_timestamp(ts: &str) -> String {
+    // Try to parse RFC3339 and format nicely
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
+        dt.format("%Y-%m-%d %H:%M:%S").to_string()
+    } else {
+        ts.to_string()
+    }
 }
 
 /// Inspect command: Connect to a server and display its capabilities.

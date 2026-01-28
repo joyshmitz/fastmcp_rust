@@ -31,5 +31,8 @@ clap = { workspace = true }
 # Logging
 log = { workspace = true }
 
+# Time/date handling
+chrono = { workspace = true }
+
 [lints]
 workspace = true
