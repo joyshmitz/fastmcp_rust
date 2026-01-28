@@ -714,6 +714,26 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
         |desc| quote! { Some(#desc.to_string()) },
     );
 
+    // Parse timeout attribute
+    let timeout_tokens = if let Some(ref timeout_str) = attrs.timeout {
+        match parse_duration_to_millis(timeout_str) {
+            Ok(millis) => {
+                quote! {
+                    fn timeout(&self) -> Option<std::time::Duration> {
+                        Some(std::time::Duration::from_millis(#millis))
+                    }
+                }
+            }
+            Err(e) => {
+                return syn::Error::new_spanned(&input_fn.sig.ident, format!("invalid timeout: {e}"))
+                    .to_compile_error()
+                    .into();
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     // Parse parameters (skip first if it's &McpContext)
     let mut params: Vec<(&Ident, &Type, Option<String>)> = Vec::new();
     let mut required_params: Vec<String> = Vec::new();
@@ -868,6 +888,8 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
 
+            #timeout_tokens
+
             fn call(
                 &self,
                 ctx: &fastmcp_core::McpContext,
@@ -903,6 +925,7 @@ struct ResourceAttrs {
     name: Option<String>,
     description: Option<String>,
     mime_type: Option<String>,
+    timeout: Option<String>,
 }
 
 impl Parse for ResourceAttrs {
@@ -911,6 +934,7 @@ impl Parse for ResourceAttrs {
         let mut name = None;
         let mut description = None;
         let mut mime_type = None;
+        let mut timeout = None;
 
         while !input.is_empty() {
             let ident: Ident = input.parse()?;
@@ -933,6 +957,10 @@ impl Parse for ResourceAttrs {
                     let lit: LitStr = input.parse()?;
                     mime_type = Some(lit.value());
                 }
+                "timeout" => {
+                    let lit: LitStr = input.parse()?;
+                    timeout = Some(lit.value());
+                }
                 _ => {
                     return Err(syn::Error::new(ident.span(), "unknown attribute"));
                 }
@@ -948,6 +976,7 @@ impl Parse for ResourceAttrs {
             name,
             description,
             mime_type,
+            timeout,
         })
     }
 }
@@ -990,6 +1019,26 @@ pub fn resource(attr: TokenStream, item: TokenStream) -> TokenStream {
         || quote! { None },
         |desc| quote! { Some(#desc.to_string()) },
     );
+
+    // Parse timeout attribute
+    let timeout_tokens = if let Some(ref timeout_str) = attrs.timeout {
+        match parse_duration_to_millis(timeout_str) {
+            Ok(millis) => {
+                quote! {
+                    fn timeout(&self) -> Option<std::time::Duration> {
+                        Some(std::time::Duration::from_millis(#millis))
+                    }
+                }
+            }
+            Err(e) => {
+                return syn::Error::new_spanned(&input_fn.sig.ident, format!("invalid timeout: {e}"))
+                    .to_compile_error()
+                    .into();
+            }
+        }
+    } else {
+        quote! {}
+    };
 
     let template_params = extract_template_params(&uri);
 
@@ -1152,6 +1201,8 @@ pub fn resource(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #template_tokens
             }
 
+            #timeout_tokens
+
             fn read(
                 &self,
                 ctx: &fastmcp_core::McpContext,
@@ -1198,12 +1249,14 @@ pub fn resource(attr: TokenStream, item: TokenStream) -> TokenStream {
 struct PromptAttrs {
     name: Option<String>,
     description: Option<String>,
+    timeout: Option<String>,
 }
 
 impl Parse for PromptAttrs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut name = None;
         let mut description = None;
+        let mut timeout = None;
 
         while !input.is_empty() {
             let ident: Ident = input.parse()?;
@@ -1218,6 +1271,10 @@ impl Parse for PromptAttrs {
                     let lit: LitStr = input.parse()?;
                     description = Some(lit.value());
                 }
+                "timeout" => {
+                    let lit: LitStr = input.parse()?;
+                    timeout = Some(lit.value());
+                }
                 _ => {
                     return Err(syn::Error::new(ident.span(), "unknown attribute"));
                 }
@@ -1228,7 +1285,7 @@ impl Parse for PromptAttrs {
             }
         }
 
-        Ok(Self { name, description })
+        Ok(Self { name, description, timeout })
     }
 }
 
@@ -1261,6 +1318,26 @@ pub fn prompt(attr: TokenStream, item: TokenStream) -> TokenStream {
         || quote! { None },
         |desc| quote! { Some(#desc.to_string()) },
     );
+
+    // Parse timeout attribute
+    let timeout_tokens = if let Some(ref timeout_str) = attrs.timeout {
+        match parse_duration_to_millis(timeout_str) {
+            Ok(millis) => {
+                quote! {
+                    fn timeout(&self) -> Option<std::time::Duration> {
+                        Some(std::time::Duration::from_millis(#millis))
+                    }
+                }
+            }
+            Err(e) => {
+                return syn::Error::new_spanned(&input_fn.sig.ident, format!("invalid timeout: {e}"))
+                    .to_compile_error()
+                    .into();
+            }
+        }
+    } else {
+        quote! {}
+    };
 
     // Parse parameters for prompt arguments (skip first if it's &McpContext)
     let mut prompt_args: Vec<TokenStream2> = Vec::new();
@@ -1381,6 +1458,8 @@ pub fn prompt(attr: TokenStream, item: TokenStream) -> TokenStream {
                     tags: vec![],
                 }
             }
+
+            #timeout_tokens
 
             fn get(
                 &self,
