@@ -1099,6 +1099,26 @@ impl McpContext {
         self
     }
 
+    /// Sets the client capability information for this context.
+    ///
+    /// This enables handlers to check what capabilities the connected
+    /// client supports.
+    #[must_use]
+    pub fn with_client_capabilities(mut self, capabilities: ClientCapabilityInfo) -> Self {
+        self.client_capabilities = Some(capabilities);
+        self
+    }
+
+    /// Sets the server capability information for this context.
+    ///
+    /// This enables handlers to check what capabilities this server
+    /// advertises.
+    #[must_use]
+    pub fn with_server_capabilities(mut self, capabilities: ServerCapabilityInfo) -> Self {
+        self.server_capabilities = Some(capabilities);
+        self
+    }
+
     /// Returns whether progress reporting is enabled for this context.
     #[must_use]
     pub fn has_progress_reporter(&self) -> bool {
@@ -1360,6 +1380,76 @@ impl McpContext {
     #[must_use]
     pub fn has_session_state(&self) -> bool {
         self.state.is_some()
+    }
+
+    // ========================================================================
+    // Capabilities Access
+    // ========================================================================
+
+    /// Returns the client capability information, if available.
+    ///
+    /// Capabilities are set by the server after initialization and reflect
+    /// what the connected client supports.
+    #[must_use]
+    pub fn client_capabilities(&self) -> Option<&ClientCapabilityInfo> {
+        self.client_capabilities.as_ref()
+    }
+
+    /// Returns the server capability information, if available.
+    ///
+    /// Reflects what capabilities this server advertises.
+    #[must_use]
+    pub fn server_capabilities(&self) -> Option<&ServerCapabilityInfo> {
+        self.server_capabilities.as_ref()
+    }
+
+    /// Returns whether the client supports sampling (LLM completions).
+    ///
+    /// This is a convenience method that checks the client capabilities.
+    /// Returns `false` if capabilities are not yet available (before initialization).
+    #[must_use]
+    pub fn client_supports_sampling(&self) -> bool {
+        self.client_capabilities
+            .as_ref()
+            .is_some_and(|c| c.sampling)
+    }
+
+    /// Returns whether the client supports elicitation (user input requests).
+    ///
+    /// This is a convenience method that checks the client capabilities.
+    /// Returns `false` if capabilities are not yet available.
+    #[must_use]
+    pub fn client_supports_elicitation(&self) -> bool {
+        self.client_capabilities
+            .as_ref()
+            .is_some_and(|c| c.elicitation)
+    }
+
+    /// Returns whether the client supports form-mode elicitation.
+    #[must_use]
+    pub fn client_supports_elicitation_form(&self) -> bool {
+        self.client_capabilities
+            .as_ref()
+            .is_some_and(|c| c.elicitation_form)
+    }
+
+    /// Returns whether the client supports URL-mode elicitation.
+    #[must_use]
+    pub fn client_supports_elicitation_url(&self) -> bool {
+        self.client_capabilities
+            .as_ref()
+            .is_some_and(|c| c.elicitation_url)
+    }
+
+    /// Returns whether the client supports roots listing.
+    ///
+    /// This is a convenience method that checks the client capabilities.
+    /// Returns `false` if capabilities are not yet available.
+    #[must_use]
+    pub fn client_supports_roots(&self) -> bool {
+        self.client_capabilities
+            .as_ref()
+            .is_some_and(|c| c.roots)
     }
 
     // ========================================================================
@@ -2539,5 +2629,94 @@ mod tests {
             let ctx = McpContext::with_state(cx, 2, state.clone());
             assert!(!ctx.is_tool_enabled("shared_tool"));
         }
+    }
+
+    // ========================================================================
+    // Capabilities Tests
+    // ========================================================================
+
+    #[test]
+    fn test_mcp_context_no_capabilities_by_default() {
+        let cx = Cx::for_testing();
+        let ctx = McpContext::new(cx, 1);
+
+        assert!(ctx.client_capabilities().is_none());
+        assert!(ctx.server_capabilities().is_none());
+        assert!(!ctx.client_supports_sampling());
+        assert!(!ctx.client_supports_elicitation());
+        assert!(!ctx.client_supports_roots());
+    }
+
+    #[test]
+    fn test_mcp_context_with_client_capabilities() {
+        let cx = Cx::for_testing();
+        let caps = ClientCapabilityInfo::new()
+            .with_sampling()
+            .with_elicitation(true, false)
+            .with_roots(true);
+
+        let ctx = McpContext::new(cx, 1).with_client_capabilities(caps);
+
+        assert!(ctx.client_capabilities().is_some());
+        assert!(ctx.client_supports_sampling());
+        assert!(ctx.client_supports_elicitation());
+        assert!(ctx.client_supports_elicitation_form());
+        assert!(!ctx.client_supports_elicitation_url());
+        assert!(ctx.client_supports_roots());
+    }
+
+    #[test]
+    fn test_mcp_context_with_server_capabilities() {
+        let cx = Cx::for_testing();
+        let caps = ServerCapabilityInfo::new()
+            .with_tools()
+            .with_resources(true)
+            .with_prompts()
+            .with_logging();
+
+        let ctx = McpContext::new(cx, 1).with_server_capabilities(caps);
+
+        let server_caps = ctx.server_capabilities().unwrap();
+        assert!(server_caps.tools);
+        assert!(server_caps.resources);
+        assert!(server_caps.resources_subscribe);
+        assert!(server_caps.prompts);
+        assert!(server_caps.logging);
+    }
+
+    #[test]
+    fn test_client_capability_info_builders() {
+        let caps = ClientCapabilityInfo::new();
+        assert!(!caps.sampling);
+        assert!(!caps.elicitation);
+        assert!(!caps.roots);
+
+        let caps = caps.with_sampling();
+        assert!(caps.sampling);
+
+        let caps = ClientCapabilityInfo::new().with_elicitation(true, true);
+        assert!(caps.elicitation);
+        assert!(caps.elicitation_form);
+        assert!(caps.elicitation_url);
+
+        let caps = ClientCapabilityInfo::new().with_roots(false);
+        assert!(caps.roots);
+        assert!(!caps.roots_list_changed);
+    }
+
+    #[test]
+    fn test_server_capability_info_builders() {
+        let caps = ServerCapabilityInfo::new();
+        assert!(!caps.tools);
+        assert!(!caps.resources);
+        assert!(!caps.prompts);
+        assert!(!caps.logging);
+
+        let caps = caps.with_tools().with_resources(false).with_prompts().with_logging();
+        assert!(caps.tools);
+        assert!(caps.resources);
+        assert!(!caps.resources_subscribe);
+        assert!(caps.prompts);
+        assert!(caps.logging);
     }
 }
