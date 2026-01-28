@@ -1298,4 +1298,278 @@ mod tests {
         assert!(!response_buf.is_empty());
         assert_eq!(response_buf[0] & 0x0F, 0x0A); // Pong opcode
     }
+
+    // =========================================================================
+    // E2E WebSocket Tests (bd-2kv / bd-2gyv)
+    // =========================================================================
+
+    #[test]
+    fn e2e_ws_bidirectional_message_flow() {
+        use fastmcp_protocol::RequestId;
+
+        // Simulate a full bidirectional message flow
+        // Server-side processing of multiple requests and responses
+
+        let mut request_buffer = Vec::new();
+
+        // Build multiple masked requests (client -> server)
+        let req1 = r#"{"jsonrpc":"2.0","method":"initialize","id":1}"#;
+        let req2 = r#"{"jsonrpc":"2.0","method":"tools/list","id":2}"#;
+        let req3 = r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"test"},"id":3}"#;
+
+        request_buffer.extend(build_masked_frame(0x01, true, req1.as_bytes()));
+        request_buffer.extend(build_masked_frame(0x01, true, req2.as_bytes()));
+        request_buffer.extend(build_masked_frame(0x01, true, req3.as_bytes()));
+
+        let mut response_buffer = Vec::new();
+        let cx = Cx::for_testing();
+
+        {
+            let mut transport = WsTransport::new(Cursor::new(request_buffer), &mut response_buffer);
+
+            // Receive and process each request
+            for expected_id in 1..=3 {
+                let msg = transport.recv(&cx).unwrap();
+                match msg {
+                    JsonRpcMessage::Request(req) => {
+                        assert_eq!(req.id, Some(RequestId::Number(expected_id)));
+
+                        // Send response
+                        let response = JsonRpcResponse {
+                            jsonrpc: std::borrow::Cow::Borrowed(fastmcp_protocol::JSONRPC_VERSION),
+                            result: Some(serde_json::json!({"ok": true})),
+                            error: None,
+                            id: req.id,
+                        };
+                        transport.send_response(&cx, &response).unwrap();
+                    }
+                    _ => panic!("Expected request"),
+                }
+            }
+        }
+
+        // Verify responses were written (unmasked for server -> client)
+        assert!(!response_buffer.is_empty());
+        // Each response should be a separate text frame
+        let frame_count = response_buffer
+            .iter()
+            .filter(|&&b| b == 0x81) // FIN + Text opcode
+            .count();
+        assert_eq!(frame_count, 3, "Expected 3 response frames");
+    }
+
+    #[test]
+    fn e2e_ws_fragmented_message_assembly() {
+        // Test receiving a fragmented JSON-RPC message
+        let full_msg =
+            r#"{"jsonrpc":"2.0","method":"test","params":{"data":"hello world"},"id":1}"#;
+        let mid = full_msg.len() / 2;
+
+        let mut buffer = Vec::new();
+        // First fragment (FIN=0, opcode=Text)
+        buffer.extend(build_masked_frame(0x01, false, full_msg[..mid].as_bytes()));
+        // Continuation fragment (FIN=1, opcode=Continuation)
+        buffer.extend(build_masked_frame(0x00, true, full_msg[mid..].as_bytes()));
+
+        let cx = Cx::for_testing();
+        let writer: Vec<u8> = Vec::new();
+        let mut transport = WsTransport::new(Cursor::new(buffer), writer);
+
+        let msg = transport.recv(&cx).unwrap();
+        match msg {
+            JsonRpcMessage::Request(req) => {
+                assert_eq!(req.method, "test");
+                let params = req.params.unwrap();
+                assert_eq!(params.get("data").unwrap(), "hello world");
+            }
+            _ => panic!("Expected request"),
+        }
+    }
+
+    #[test]
+    fn e2e_ws_interleaved_ping_during_operation() {
+        // Test that ping/pong doesn't disrupt normal message flow
+        let mut buffer = Vec::new();
+
+        // Message 1
+        buffer.extend(build_masked_frame(
+            0x01,
+            true,
+            r#"{"jsonrpc":"2.0","method":"msg1","id":1}"#.as_bytes(),
+        ));
+        // Ping (should be handled automatically)
+        buffer.extend(build_masked_frame(0x09, true, b"keepalive"));
+        // Message 2
+        buffer.extend(build_masked_frame(
+            0x01,
+            true,
+            r#"{"jsonrpc":"2.0","method":"msg2","id":2}"#.as_bytes(),
+        ));
+        // Another ping
+        buffer.extend(build_masked_frame(0x09, true, b"alive"));
+        // Message 3
+        buffer.extend(build_masked_frame(
+            0x01,
+            true,
+            r#"{"jsonrpc":"2.0","method":"msg3","id":3}"#.as_bytes(),
+        ));
+
+        let mut response_buffer = Vec::new();
+        let cx = Cx::for_testing();
+        let mut transport = WsTransport::new(Cursor::new(buffer), &mut response_buffer);
+
+        // Should receive all 3 messages, with pings handled automatically
+        for i in 1..=3 {
+            let msg = transport.recv(&cx).unwrap();
+            if let JsonRpcMessage::Request(req) = msg {
+                assert_eq!(req.method, format!("msg{i}"));
+            } else {
+                panic!("Expected request");
+            }
+        }
+
+        // Verify pongs were sent - the response buffer should contain pong frames
+        // Pong frames have opcode 0x0A and FIN bit set (0x8A)
+        // Just verify we have some response data (pongs are there)
+        assert!(
+            !response_buffer.is_empty(),
+            "Expected pong responses to be written"
+        );
+    }
+
+    #[test]
+    fn e2e_ws_graceful_close() {
+        // Test graceful close handshake
+        let mut buffer = Vec::new();
+        // Message followed by close
+        buffer.extend(build_masked_frame(
+            0x01,
+            true,
+            r#"{"jsonrpc":"2.0","method":"last","id":1}"#.as_bytes(),
+        ));
+        buffer.extend(build_masked_frame(0x08, true, &[])); // Close frame
+
+        let mut response_buffer = Vec::new();
+        let cx = Cx::for_testing();
+        let mut transport = WsTransport::new(Cursor::new(buffer), &mut response_buffer);
+
+        // Receive the message
+        let msg = transport.recv(&cx).unwrap();
+        assert!(matches!(msg, JsonRpcMessage::Request(_)));
+
+        // Next recv should return Closed
+        let result = transport.recv(&cx);
+        assert!(matches!(result, Err(TransportError::Closed)));
+    }
+
+    #[test]
+    fn e2e_ws_cancellation_respected() {
+        let buffer = build_masked_frame(
+            0x01,
+            true,
+            r#"{"jsonrpc":"2.0","method":"test","id":1}"#.as_bytes(),
+        );
+
+        let cx = Cx::for_testing();
+        cx.set_cancel_requested(true);
+
+        let writer: Vec<u8> = Vec::new();
+        let mut transport = WsTransport::new(Cursor::new(buffer), writer);
+
+        // Recv should respect cancellation
+        let result = transport.recv(&cx);
+        assert!(matches!(result, Err(TransportError::Cancelled)));
+    }
+
+    #[test]
+    fn e2e_ws_send_cancellation_respected() {
+        let cx = Cx::for_testing();
+        cx.set_cancel_requested(true);
+
+        let reader: &[u8] = &[];
+        let mut writer = Vec::new();
+        let mut transport = WsTransport::new(reader, &mut writer);
+
+        let request = JsonRpcRequest::new("test", None, 1i64);
+        let result = transport.send_request(&cx, &request);
+        assert!(matches!(result, Err(TransportError::Cancelled)));
+
+        // Nothing should be written
+        assert!(writer.is_empty());
+    }
+
+    #[test]
+    fn e2e_ws_unicode_in_messages() {
+        // Test Unicode handling in WebSocket text frames
+        let unicode_msg =
+            r#"{"jsonrpc":"2.0","method":"test","params":{"text":"Hello 世界 👋 éèê"},"id":1}"#;
+        let buffer = build_masked_frame(0x01, true, unicode_msg.as_bytes());
+
+        let cx = Cx::for_testing();
+        let writer: Vec<u8> = Vec::new();
+        let mut transport = WsTransport::new(Cursor::new(buffer), writer);
+
+        let msg = transport.recv(&cx).unwrap();
+        if let JsonRpcMessage::Request(req) = msg {
+            let params = req.params.unwrap();
+            let text = params.get("text").unwrap().as_str().unwrap();
+            assert!(text.contains("世界"));
+            assert!(text.contains("👋"));
+            assert!(text.contains("éèê"));
+        } else {
+            panic!("Expected request");
+        }
+    }
+
+    #[test]
+    fn e2e_ws_client_server_full_flow() {
+        use fastmcp_protocol::RequestId;
+
+        // Full client-server flow with proper masking
+
+        // 1. Client sends masked request
+        let mut client_to_server = Vec::new();
+        {
+            let mut writer = WsClientWriter::new(&mut client_to_server);
+            let request = r#"{"jsonrpc":"2.0","method":"initialize","id":1}"#;
+            writer.write_frame(&WsFrame::text(request)).unwrap();
+        }
+
+        // 2. Server receives and processes
+        let mut server_response = Vec::new();
+        {
+            let cx = Cx::for_testing();
+            let mut transport =
+                WsTransport::new(Cursor::new(client_to_server.clone()), &mut server_response);
+
+            let msg = transport.recv(&cx).unwrap();
+            if let JsonRpcMessage::Request(req) = msg {
+                assert_eq!(req.method, "initialize");
+
+                // Send response (unmasked)
+                let response = JsonRpcResponse {
+                    jsonrpc: std::borrow::Cow::Borrowed(fastmcp_protocol::JSONRPC_VERSION),
+                    result: Some(serde_json::json!({"capabilities": {}})),
+                    error: None,
+                    id: Some(RequestId::Number(1)),
+                };
+                transport.send_response(&cx, &response).unwrap();
+            }
+        }
+
+        // 3. Client receives response
+        {
+            let cx = Cx::for_testing();
+            let mut transport =
+                WsClientTransport::new(Cursor::new(server_response), Vec::<u8>::new());
+
+            let msg = transport.recv(&cx).unwrap();
+            if let JsonRpcMessage::Response(resp) = msg {
+                assert_eq!(resp.id, Some(RequestId::Number(1)));
+                assert!(resp.result.is_some());
+            } else {
+                panic!("Expected response");
+            }
+        }
+    }
 }
