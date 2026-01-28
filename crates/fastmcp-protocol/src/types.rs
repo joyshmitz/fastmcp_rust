@@ -361,6 +361,9 @@ pub struct Tool {
     /// Input schema (JSON Schema).
     #[serde(rename = "inputSchema")]
     pub input_schema: serde_json::Value,
+    /// Output schema (JSON Schema) describing the tool's result structure.
+    #[serde(rename = "outputSchema", skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<serde_json::Value>,
     /// Icon for visual representation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<Icon>,

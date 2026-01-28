@@ -248,6 +248,15 @@ pub trait ToolHandler: Send + Sync {
         None
     }
 
+    /// Returns the tool's output schema (JSON Schema).
+    ///
+    /// Default implementation returns `None`. Override to provide a schema
+    /// that describes the structure of the tool's output.
+    /// Note: Output schema can also be set directly in `definition()`.
+    fn output_schema(&self) -> Option<serde_json::Value> {
+        None
+    }
+
     /// Returns the tool's custom timeout duration.
     ///
     /// Default implementation returns `None`, meaning the server's default
@@ -532,6 +541,10 @@ impl ToolHandler for MountedToolHandler {
 
     fn annotations(&self) -> Option<&ToolAnnotations> {
         self.inner.annotations()
+    }
+
+    fn output_schema(&self) -> Option<serde_json::Value> {
+        self.inner.output_schema()
     }
 
     fn timeout(&self) -> Option<Duration> {

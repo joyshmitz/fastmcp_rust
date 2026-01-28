@@ -640,6 +640,8 @@ struct ToolAttrs {
     name: Option<String>,
     description: Option<String>,
     timeout: Option<String>,
+    /// Output schema as a JSON literal or type name
+    output_schema: Option<syn::Expr>,
 }
 
 impl Parse for ToolAttrs {
@@ -647,6 +649,7 @@ impl Parse for ToolAttrs {
         let mut name = None;
         let mut description = None;
         let mut timeout = None;
+        let mut output_schema = None;
 
         while !input.is_empty() {
             let ident: Ident = input.parse()?;
@@ -665,6 +668,11 @@ impl Parse for ToolAttrs {
                     let lit: LitStr = input.parse()?;
                     timeout = Some(lit.value());
                 }
+                "output_schema" => {
+                    // Accept any expression (json!(...), type name, etc.)
+                    let expr: syn::Expr = input.parse()?;
+                    output_schema = Some(expr);
+                }
                 _ => {
                     return Err(syn::Error::new(ident.span(), "unknown attribute"));
                 }
@@ -675,7 +683,7 @@ impl Parse for ToolAttrs {
             }
         }
 
-        Ok(Self { name, description, timeout })
+        Ok(Self { name, description, timeout, output_schema })
     }
 }
 
@@ -732,6 +740,20 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     } else {
         quote! {}
+    };
+
+    // Parse output_schema attribute
+    let (output_schema_field, output_schema_method) = if let Some(ref schema_expr) = attrs.output_schema {
+        (
+            quote! { Some(#schema_expr) },
+            quote! {
+                fn output_schema(&self) -> Option<serde_json::Value> {
+                    Some(#schema_expr)
+                }
+            }
+        )
+    } else {
+        (quote! { None }, quote! {})
     };
 
     // Parse parameters (skip first if it's &McpContext)
