@@ -1013,6 +1013,10 @@ fn transport_error_to_mcp(e: TransportError) -> McpError {
 mod tests {
     use super::*;
 
+    // ========================================
+    // method_not_found_response tests
+    // ========================================
+
     #[test]
     fn method_not_found_response_for_request() {
         let request = JsonRpcRequest::new("sampling/createMessage", None, "req-1");
@@ -1035,5 +1039,108 @@ mod tests {
         let request = JsonRpcRequest::notification("notifications/message", None);
         let response = method_not_found_response(&request);
         assert!(response.is_none());
+    }
+
+    #[test]
+    fn method_not_found_response_with_numeric_id() {
+        let request = JsonRpcRequest::new("unknown/method", None, 42i64);
+        let response = method_not_found_response(&request);
+        assert!(response.is_some());
+        if let Some(JsonRpcMessage::Response(resp)) = response {
+            assert_eq!(resp.id, Some(RequestId::Number(42)));
+            let error = resp.error.as_ref().unwrap();
+            assert_eq!(
+                error.code,
+                i32::from(fastmcp_core::McpErrorCode::MethodNotFound)
+            );
+            assert!(error.message.contains("unknown/method"));
+        }
+    }
+
+    #[test]
+    fn method_not_found_response_with_params() {
+        let params = serde_json::json!({"key": "value"});
+        let request = JsonRpcRequest::new("roots/list", Some(params), "req-99");
+        let response = method_not_found_response(&request);
+        assert!(response.is_some());
+        if let Some(JsonRpcMessage::Response(resp)) = response {
+            let error = resp.error.as_ref().unwrap();
+            assert!(error.message.contains("roots/list"));
+        }
+    }
+
+    // ========================================
+    // transport_error_to_mcp tests
+    // ========================================
+
+    #[test]
+    fn transport_error_cancelled_maps_to_request_cancelled() {
+        let err = transport_error_to_mcp(TransportError::Cancelled);
+        assert_eq!(err.code, fastmcp_core::McpErrorCode::RequestCancelled);
+    }
+
+    #[test]
+    fn transport_error_closed_maps_to_internal() {
+        let err = transport_error_to_mcp(TransportError::Closed);
+        assert_eq!(err.code, fastmcp_core::McpErrorCode::InternalError);
+        assert!(err.message.contains("closed"));
+    }
+
+    #[test]
+    fn transport_error_timeout_maps_to_internal() {
+        let err = transport_error_to_mcp(TransportError::Timeout);
+        assert_eq!(err.code, fastmcp_core::McpErrorCode::InternalError);
+        assert!(err.message.contains("timed out"));
+    }
+
+    #[test]
+    fn transport_error_io_maps_to_internal() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe broken");
+        let err = transport_error_to_mcp(TransportError::Io(io_err));
+        assert_eq!(err.code, fastmcp_core::McpErrorCode::InternalError);
+        assert!(err.message.contains("I/O error"));
+    }
+
+    #[test]
+    fn transport_error_codec_maps_to_internal() {
+        use fastmcp_transport::CodecError;
+        let codec_err = CodecError::MessageTooLarge(999_999);
+        let err = transport_error_to_mcp(TransportError::Codec(codec_err));
+        assert_eq!(err.code, fastmcp_core::McpErrorCode::InternalError);
+        assert!(err.message.contains("Codec error"));
+    }
+
+    // ========================================
+    // ClientProgressParams tests
+    // ========================================
+
+    #[test]
+    fn client_progress_params_deserialization() {
+        let json = serde_json::json!({
+            "progressToken": 42,
+            "progress": 0.5,
+            "total": 1.0,
+            "message": "Halfway done"
+        });
+        let params: ClientProgressParams = serde_json::from_value(json).unwrap();
+        assert_eq!(params.marker, ProgressMarker::Number(42));
+        assert!((params.progress - 0.5).abs() < f64::EPSILON);
+        assert!((params.total.unwrap() - 1.0).abs() < f64::EPSILON);
+        assert_eq!(params.message.as_deref(), Some("Halfway done"));
+    }
+
+    #[test]
+    fn client_progress_params_minimal() {
+        let json = serde_json::json!({
+            "progressToken": "tok-1",
+            "progress": 0.0
+        });
+        let params: ClientProgressParams = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            params.marker,
+            ProgressMarker::String("tok-1".to_string())
+        );
+        assert!(params.total.is_none());
+        assert!(params.message.is_none());
     }
 }

@@ -519,4 +519,47 @@ mod tests {
         let builder = ClientBuilder::new().auto_initialize(false);
         assert!(!builder.auto_initialize);
     }
+
+    #[test]
+    fn test_builder_capabilities() {
+        let caps = ClientCapabilities {
+            sampling: Some(fastmcp_protocol::SamplingCapability {}),
+            elicitation: None,
+            roots: None,
+        };
+        let builder = ClientBuilder::new().capabilities(caps);
+        assert!(builder.capabilities.sampling.is_some());
+        assert!(builder.capabilities.elicitation.is_none());
+        assert!(builder.capabilities.roots.is_none());
+    }
+
+    #[test]
+    fn test_builder_default_trait() {
+        let builder = ClientBuilder::default();
+        assert_eq!(builder.client_info.name, "fastmcp-client");
+        assert_eq!(builder.timeout_ms, 30_000);
+        assert_eq!(builder.max_retries, 0);
+        assert!(!builder.auto_initialize);
+    }
+
+    #[test]
+    fn test_builder_env_override() {
+        let builder = ClientBuilder::new()
+            .env("KEY", "first")
+            .env("KEY", "second");
+        assert_eq!(builder.env_vars.get("KEY"), Some(&"second".to_string()));
+    }
+
+    #[test]
+    fn test_builder_envs_combined_with_env() {
+        let builder = ClientBuilder::new()
+            .env("A", "1")
+            .envs([("B", "2"), ("C", "3")])
+            .env("D", "4");
+        assert_eq!(builder.env_vars.len(), 4);
+        assert_eq!(builder.env_vars.get("A"), Some(&"1".to_string()));
+        assert_eq!(builder.env_vars.get("B"), Some(&"2".to_string()));
+        assert_eq!(builder.env_vars.get("C"), Some(&"3".to_string()));
+        assert_eq!(builder.env_vars.get("D"), Some(&"4".to_string()));
+    }
 }

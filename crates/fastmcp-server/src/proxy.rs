@@ -770,4 +770,433 @@ mod tests {
         assert_eq!(def.uri, "storage/file://data");
         assert_eq!(def.name, "Data File");
     }
+
+    // =========================================================================
+    // ProxyCatalog Edge Cases
+    // =========================================================================
+
+    #[test]
+    fn proxy_catalog_empty_backend() {
+        let mut backend = TestBackend::default();
+        let catalog = ProxyCatalog::from_backend(&mut backend).expect("catalog");
+        assert!(catalog.tools.is_empty());
+        assert!(catalog.resources.is_empty());
+        assert!(catalog.resource_templates.is_empty());
+        assert!(catalog.prompts.is_empty());
+    }
+
+    #[test]
+    fn proxy_catalog_default_is_empty() {
+        let catalog = ProxyCatalog::default();
+        assert!(catalog.tools.is_empty());
+        assert!(catalog.resources.is_empty());
+        assert!(catalog.resource_templates.is_empty());
+        assert!(catalog.prompts.is_empty());
+    }
+
+    #[test]
+    fn proxy_catalog_multiple_items() {
+        let mut backend = TestBackend {
+            tools: vec![
+                Tool {
+                    name: "t1".to_string(),
+                    description: None,
+                    input_schema: serde_json::json!({}),
+                    output_schema: None,
+                    icon: None,
+                    version: None,
+                    tags: vec![],
+                    annotations: None,
+                },
+                Tool {
+                    name: "t2".to_string(),
+                    description: None,
+                    input_schema: serde_json::json!({}),
+                    output_schema: None,
+                    icon: None,
+                    version: None,
+                    tags: vec![],
+                    annotations: None,
+                },
+            ],
+            prompts: vec![
+                Prompt {
+                    name: "p1".to_string(),
+                    description: None,
+                    arguments: Vec::new(),
+                    icon: None,
+                    version: None,
+                    tags: vec![],
+                },
+                Prompt {
+                    name: "p2".to_string(),
+                    description: None,
+                    arguments: Vec::new(),
+                    icon: None,
+                    version: None,
+                    tags: vec![],
+                },
+            ],
+            ..TestBackend::default()
+        };
+        let catalog = ProxyCatalog::from_backend(&mut backend).expect("catalog");
+        assert_eq!(catalog.tools.len(), 2);
+        assert_eq!(catalog.prompts.len(), 2);
+    }
+
+    // =========================================================================
+    // ProxyClient Tests
+    // =========================================================================
+
+    #[test]
+    fn proxy_client_clone_shares_backend() {
+        let state = Arc::new(Mutex::new(TestState::default()));
+        let backend = TestBackend {
+            tools: vec![Tool {
+                name: "shared".to_string(),
+                description: None,
+                input_schema: serde_json::json!({}),
+                output_schema: None,
+                icon: None,
+                version: None,
+                tags: vec![],
+                annotations: None,
+            }],
+            state: Arc::clone(&state),
+            ..TestBackend::default()
+        };
+        let proxy1 = ProxyClient::from_backend(backend);
+        let proxy2 = proxy1.clone();
+
+        // Both clones should reach the same backend
+        let catalog1 = proxy1.catalog().expect("catalog1");
+        let catalog2 = proxy2.catalog().expect("catalog2");
+        assert_eq!(catalog1.tools.len(), catalog2.tools.len());
+    }
+
+    #[test]
+    fn proxy_client_catalog_fetches_all() {
+        let backend = TestBackend {
+            tools: vec![Tool {
+                name: "t".to_string(),
+                description: None,
+                input_schema: serde_json::json!({}),
+                output_schema: None,
+                icon: None,
+                version: None,
+                tags: vec![],
+                annotations: None,
+            }],
+            resources: vec![Resource {
+                uri: "test://r".to_string(),
+                name: "r".to_string(),
+                description: None,
+                mime_type: None,
+                icon: None,
+                version: None,
+                tags: vec![],
+            }],
+            prompts: vec![Prompt {
+                name: "p".to_string(),
+                description: None,
+                arguments: Vec::new(),
+                icon: None,
+                version: None,
+                tags: vec![],
+            }],
+            ..TestBackend::default()
+        };
+        let proxy = ProxyClient::from_backend(backend);
+        let catalog = proxy.catalog().expect("catalog");
+        assert_eq!(catalog.tools.len(), 1);
+        assert_eq!(catalog.resources.len(), 1);
+        assert_eq!(catalog.prompts.len(), 1);
+    }
+
+    // =========================================================================
+    // ProxyResourceHandler Tests
+    // =========================================================================
+
+    #[test]
+    fn proxy_resource_handler_read_forwards_to_backend() {
+        use super::ProxyResourceHandler;
+        use crate::handler::ResourceHandler;
+
+        let backend = TestBackend::default();
+        let proxy = ProxyClient::from_backend(backend);
+        let handler = ProxyResourceHandler::new(
+            Resource {
+                uri: "test://resource".to_string(),
+                name: "Test".to_string(),
+                description: None,
+                mime_type: None,
+                icon: None,
+                version: None,
+                tags: vec![],
+            },
+            proxy,
+        );
+
+        let ctx = McpContext::new(Cx::for_testing(), 1);
+        let result = handler.read(&ctx).expect("read ok");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].text, Some("resource".to_string()));
+    }
+
+    #[test]
+    fn proxy_resource_handler_no_template_by_default() {
+        use super::ProxyResourceHandler;
+        use crate::handler::ResourceHandler;
+
+        let backend = TestBackend::default();
+        let proxy = ProxyClient::from_backend(backend);
+        let handler = ProxyResourceHandler::new(
+            Resource {
+                uri: "test://x".to_string(),
+                name: "x".to_string(),
+                description: None,
+                mime_type: None,
+                icon: None,
+                version: None,
+                tags: vec![],
+            },
+            proxy,
+        );
+        assert!(handler.template().is_none());
+    }
+
+    #[test]
+    fn proxy_resource_handler_from_template() {
+        use super::ProxyResourceHandler;
+        use crate::handler::ResourceHandler;
+        use fastmcp_protocol::ResourceTemplate;
+
+        let backend = TestBackend::default();
+        let proxy = ProxyClient::from_backend(backend);
+        let template = ResourceTemplate {
+            uri_template: "file://{path}".to_string(),
+            name: "File".to_string(),
+            description: Some("A file resource".to_string()),
+            mime_type: Some("text/plain".to_string()),
+            icon: None,
+            version: None,
+            tags: vec![],
+        };
+        let handler = ProxyResourceHandler::from_template(template.clone(), proxy);
+
+        // Definition should mirror the template
+        let def = handler.definition();
+        assert_eq!(def.uri, "file://{path}");
+        assert_eq!(def.name, "File");
+        assert_eq!(def.description, Some("A file resource".to_string()));
+        assert_eq!(def.mime_type, Some("text/plain".to_string()));
+
+        // Template should be available
+        let tmpl = handler.template().expect("has template");
+        assert_eq!(tmpl.uri_template, "file://{path}");
+    }
+
+    #[test]
+    fn proxy_resource_handler_from_template_with_prefix() {
+        use super::ProxyResourceHandler;
+        use crate::handler::ResourceHandler;
+        use fastmcp_protocol::ResourceTemplate;
+
+        let backend = TestBackend::default();
+        let proxy = ProxyClient::from_backend(backend);
+        let template = ResourceTemplate {
+            uri_template: "file://{path}".to_string(),
+            name: "File".to_string(),
+            description: None,
+            mime_type: None,
+            icon: None,
+            version: None,
+            tags: vec![],
+        };
+        let handler = ProxyResourceHandler::from_template_with_prefix(template, "storage", proxy);
+
+        // Definition should have prefixed URI template
+        let def = handler.definition();
+        assert_eq!(def.uri, "storage/file://{path}");
+
+        // Template should also be prefixed
+        let tmpl = handler.template().expect("has template");
+        assert_eq!(tmpl.uri_template, "storage/file://{path}");
+    }
+
+    // =========================================================================
+    // Error Propagation Tests
+    // =========================================================================
+
+    /// A backend that always returns errors.
+    struct FailingBackend;
+
+    impl ProxyBackend for FailingBackend {
+        fn list_tools(&mut self) -> fastmcp_core::McpResult<Vec<Tool>> {
+            Err(fastmcp_core::McpError::internal_error("tool list failed"))
+        }
+
+        fn list_resources(&mut self) -> fastmcp_core::McpResult<Vec<Resource>> {
+            Err(fastmcp_core::McpError::internal_error(
+                "resource list failed",
+            ))
+        }
+
+        fn list_resource_templates(
+            &mut self,
+        ) -> fastmcp_core::McpResult<Vec<fastmcp_protocol::ResourceTemplate>> {
+            Err(fastmcp_core::McpError::internal_error(
+                "template list failed",
+            ))
+        }
+
+        fn list_prompts(&mut self) -> fastmcp_core::McpResult<Vec<Prompt>> {
+            Err(fastmcp_core::McpError::internal_error(
+                "prompt list failed",
+            ))
+        }
+
+        fn call_tool(
+            &mut self,
+            _name: &str,
+            _arguments: serde_json::Value,
+        ) -> fastmcp_core::McpResult<Vec<Content>> {
+            Err(fastmcp_core::McpError::internal_error("tool call failed"))
+        }
+
+        fn call_tool_with_progress(
+            &mut self,
+            _name: &str,
+            _arguments: serde_json::Value,
+            _on_progress: super::ProgressCallback<'_>,
+        ) -> fastmcp_core::McpResult<Vec<Content>> {
+            Err(fastmcp_core::McpError::internal_error("tool call failed"))
+        }
+
+        fn read_resource(
+            &mut self,
+            _uri: &str,
+        ) -> fastmcp_core::McpResult<Vec<ResourceContent>> {
+            Err(fastmcp_core::McpError::internal_error(
+                "resource read failed",
+            ))
+        }
+
+        fn get_prompt(
+            &mut self,
+            _name: &str,
+            _arguments: HashMap<String, String>,
+        ) -> fastmcp_core::McpResult<Vec<PromptMessage>> {
+            Err(fastmcp_core::McpError::internal_error(
+                "prompt get failed",
+            ))
+        }
+    }
+
+    #[test]
+    fn proxy_catalog_propagates_tool_list_error() {
+        let mut backend = FailingBackend;
+        let result = ProxyCatalog::from_backend(&mut backend);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("tool list failed"));
+    }
+
+    #[test]
+    fn proxy_tool_handler_propagates_call_error() {
+        let proxy = ProxyClient::from_backend(FailingBackend);
+        let handler = ProxyToolHandler::new(
+            Tool {
+                name: "fail".to_string(),
+                description: None,
+                input_schema: serde_json::json!({}),
+                output_schema: None,
+                icon: None,
+                version: None,
+                tags: vec![],
+                annotations: None,
+            },
+            proxy,
+        );
+
+        let ctx = McpContext::new(Cx::for_testing(), 1);
+        let result = handler.call(&ctx, serde_json::json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("tool call failed"));
+    }
+
+    #[test]
+    fn proxy_resource_handler_propagates_read_error() {
+        use super::ProxyResourceHandler;
+        use crate::handler::ResourceHandler;
+
+        let proxy = ProxyClient::from_backend(FailingBackend);
+        let handler = ProxyResourceHandler::new(
+            Resource {
+                uri: "test://fail".to_string(),
+                name: "Fail".to_string(),
+                description: None,
+                mime_type: None,
+                icon: None,
+                version: None,
+                tags: vec![],
+            },
+            proxy,
+        );
+
+        let ctx = McpContext::new(Cx::for_testing(), 1);
+        let result = handler.read(&ctx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("resource read failed"));
+    }
+
+    #[test]
+    fn proxy_prompt_handler_propagates_get_error() {
+        let proxy = ProxyClient::from_backend(FailingBackend);
+        let handler = ProxyPromptHandler::new(
+            Prompt {
+                name: "fail".to_string(),
+                description: None,
+                arguments: Vec::new(),
+                icon: None,
+                version: None,
+                tags: vec![],
+            },
+            proxy,
+        );
+
+        let ctx = McpContext::new(Cx::for_testing(), 1);
+        let result = handler.get(&ctx, HashMap::new());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("prompt get failed"));
+    }
+
+    // =========================================================================
+    // resource_from_template Helper
+    // =========================================================================
+
+    #[test]
+    fn resource_from_template_copies_all_fields() {
+        use fastmcp_protocol::ResourceTemplate;
+
+        let template = ResourceTemplate {
+            uri_template: "db://{table}/{id}".to_string(),
+            name: "Database Record".to_string(),
+            description: Some("A database record".to_string()),
+            mime_type: Some("application/json".to_string()),
+            icon: None,
+            version: Some("1.0.0".to_string()),
+            tags: vec!["db".to_string()],
+        };
+        let resource = super::resource_from_template(&template);
+        assert_eq!(resource.uri, "db://{table}/{id}");
+        assert_eq!(resource.name, "Database Record");
+        assert_eq!(resource.description, Some("A database record".to_string()));
+        assert_eq!(
+            resource.mime_type,
+            Some("application/json".to_string())
+        );
+        assert_eq!(resource.version, Some("1.0.0".to_string()));
+        assert_eq!(resource.tags, vec!["db".to_string()]);
+    }
 }

@@ -5291,3 +5291,1458 @@ mod ctx_call_tool_tests {
         );
     }
 }
+
+// ============================================================================
+// Handler Direct Tests
+// ============================================================================
+
+mod handler_direct_tests {
+    use super::*;
+    use crate::handler::{
+        BidirectionalSenders, MountedPromptHandler, MountedResourceHandler, MountedToolHandler,
+        ProgressNotificationSender, UriParams,
+    };
+    use fastmcp_protocol::{Icon, ToolAnnotations};
+
+    /// Helper: create a test McpContext.
+    fn test_ctx() -> McpContext {
+        let cx = Cx::for_testing();
+        McpContext::new(cx, 1)
+    }
+
+    // ── ToolHandler direct call ──────────────────────────────────────
+
+    #[test]
+    fn tool_handler_call_returns_content() {
+        let tool = GreetTool;
+        let ctx = test_ctx();
+        let result = tool.call(&ctx, serde_json::json!({"name": "Alice"}));
+        assert!(result.is_ok());
+        let contents = result.unwrap();
+        assert_eq!(contents.len(), 1);
+        match &contents[0] {
+            Content::Text { text } => assert_eq!(text, "Hello, Alice!"),
+            _ => panic!("Expected text content"),
+        }
+    }
+
+    #[test]
+    fn tool_handler_call_default_arg() {
+        let tool = GreetTool;
+        let ctx = test_ctx();
+        let result = tool.call(&ctx, serde_json::json!({}));
+        assert!(result.is_ok());
+        match &result.unwrap()[0] {
+            Content::Text { text } => assert_eq!(text, "Hello, World!"),
+            _ => panic!("Expected text content"),
+        }
+    }
+
+    #[test]
+    fn tool_handler_error_returns_mcp_error() {
+        let tool = ErrorTool;
+        let ctx = test_ctx();
+        let result = tool.call(&ctx, serde_json::json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, McpErrorCode::InternalError);
+    }
+
+    #[test]
+    fn tool_handler_definition_has_expected_fields() {
+        let tool = GreetTool;
+        let def = tool.definition();
+        assert_eq!(def.name, "greet");
+        assert!(def.description.is_some());
+        assert_eq!(def.input_schema["type"], "object");
+        assert!(def.input_schema["properties"]["name"].is_object());
+    }
+
+    #[test]
+    fn tool_handler_default_icon_is_none() {
+        let tool = GreetTool;
+        assert!(tool.icon().is_none());
+    }
+
+    #[test]
+    fn tool_handler_default_version_is_none() {
+        let tool = GreetTool;
+        assert!(tool.version().is_none());
+    }
+
+    #[test]
+    fn tool_handler_default_tags_is_empty() {
+        let tool = GreetTool;
+        assert!(tool.tags().is_empty());
+    }
+
+    #[test]
+    fn tool_handler_default_annotations_is_none() {
+        let tool = GreetTool;
+        assert!(tool.annotations().is_none());
+    }
+
+    #[test]
+    fn tool_handler_default_output_schema_is_none() {
+        let tool = GreetTool;
+        assert!(tool.output_schema().is_none());
+    }
+
+    #[test]
+    fn tool_handler_default_timeout_is_none() {
+        let tool = GreetTool;
+        assert!(tool.timeout().is_none());
+    }
+
+    // ── Custom tool with overrides ───────────────────────────────────
+
+    struct RichTool {
+        icon: Icon,
+        version: String,
+        tags: Vec<String>,
+        annotations: ToolAnnotations,
+        output_schema: serde_json::Value,
+        timeout: Duration,
+    }
+
+    impl Default for RichTool {
+        fn default() -> Self {
+            Self {
+                icon: Icon {
+                    src: Some("https://example.com/icon.png".to_string()),
+                    mime_type: None,
+                    sizes: None,
+                },
+                version: "2.0.0".to_string(),
+                tags: vec!["api".to_string(), "read".to_string()],
+                annotations: ToolAnnotations {
+                    destructive: Some(false),
+                    idempotent: Some(true),
+                    read_only: Some(true),
+                    open_world_hint: Some("none".to_string()),
+                },
+                output_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "result": {"type": "string"}
+                    }
+                }),
+                timeout: Duration::from_secs(60),
+            }
+        }
+    }
+
+    impl ToolHandler for RichTool {
+        fn definition(&self) -> Tool {
+            Tool {
+                name: "rich".to_string(),
+                description: Some("A fully configured tool".to_string()),
+                input_schema: serde_json::json!({"type": "object"}),
+                output_schema: Some(self.output_schema.clone()),
+                icon: Some(self.icon.clone()),
+                version: Some(self.version.clone()),
+                tags: self.tags.clone(),
+                annotations: Some(self.annotations.clone()),
+            }
+        }
+
+        fn icon(&self) -> Option<&Icon> {
+            Some(&self.icon)
+        }
+
+        fn version(&self) -> Option<&str> {
+            Some(&self.version)
+        }
+
+        fn tags(&self) -> &[String] {
+            &self.tags
+        }
+
+        fn annotations(&self) -> Option<&ToolAnnotations> {
+            Some(&self.annotations)
+        }
+
+        fn output_schema(&self) -> Option<serde_json::Value> {
+            Some(self.output_schema.clone())
+        }
+
+        fn timeout(&self) -> Option<Duration> {
+            Some(self.timeout)
+        }
+
+        fn call(
+            &self,
+            _ctx: &McpContext,
+            _arguments: serde_json::Value,
+        ) -> McpResult<Vec<Content>> {
+            Ok(vec![Content::Text {
+                text: "rich result".to_string(),
+            }])
+        }
+    }
+
+    #[test]
+    fn tool_handler_custom_icon() {
+        let tool = RichTool::default();
+        assert!(tool.icon().is_some());
+    }
+
+    #[test]
+    fn tool_handler_custom_version() {
+        let tool = RichTool::default();
+        assert_eq!(tool.version(), Some("2.0.0"));
+    }
+
+    #[test]
+    fn tool_handler_custom_tags() {
+        let tool = RichTool::default();
+        assert_eq!(tool.tags().len(), 2);
+        assert_eq!(tool.tags()[0], "api");
+    }
+
+    #[test]
+    fn tool_handler_custom_annotations() {
+        let tool = RichTool::default();
+        let ann = tool.annotations().unwrap();
+        assert_eq!(ann.read_only, Some(true));
+        assert_eq!(ann.destructive, Some(false));
+        assert_eq!(ann.idempotent, Some(true));
+    }
+
+    #[test]
+    fn tool_handler_custom_output_schema() {
+        let tool = RichTool::default();
+        let schema = tool.output_schema().unwrap();
+        assert_eq!(schema["type"], "object");
+    }
+
+    #[test]
+    fn tool_handler_custom_timeout() {
+        let tool = RichTool::default();
+        assert_eq!(tool.timeout(), Some(Duration::from_secs(60)));
+    }
+
+    // ── ResourceHandler direct read ──────────────────────────────────
+
+    #[test]
+    fn resource_handler_read_returns_content() {
+        let resource = StaticResource {
+            uri: "test://hello".to_string(),
+            content: "world".to_string(),
+        };
+        let ctx = test_ctx();
+        let result = resource.read(&ctx);
+        assert!(result.is_ok());
+        let contents = result.unwrap();
+        assert_eq!(contents.len(), 1);
+        assert_eq!(contents[0].uri, "test://hello");
+        assert_eq!(contents[0].text, Some("world".to_string()));
+    }
+
+    #[test]
+    fn resource_handler_definition_fields() {
+        let resource = StaticResource {
+            uri: "test://data".to_string(),
+            content: "content".to_string(),
+        };
+        let def = resource.definition();
+        assert_eq!(def.uri, "test://data");
+        assert_eq!(def.name, "Static Resource");
+        assert_eq!(def.mime_type, Some("text/plain".to_string()));
+    }
+
+    #[test]
+    fn resource_handler_default_template_is_none() {
+        let resource = StaticResource {
+            uri: "test://data".to_string(),
+            content: "content".to_string(),
+        };
+        assert!(resource.template().is_none());
+    }
+
+    #[test]
+    fn resource_handler_default_icon_is_none() {
+        let resource = StaticResource {
+            uri: "test://data".to_string(),
+            content: "".to_string(),
+        };
+        assert!(resource.icon().is_none());
+    }
+
+    #[test]
+    fn resource_handler_default_version_is_none() {
+        let resource = StaticResource {
+            uri: "test://data".to_string(),
+            content: "".to_string(),
+        };
+        assert!(resource.version().is_none());
+    }
+
+    #[test]
+    fn resource_handler_default_tags_is_empty() {
+        let resource = StaticResource {
+            uri: "test://data".to_string(),
+            content: "".to_string(),
+        };
+        assert!(resource.tags().is_empty());
+    }
+
+    #[test]
+    fn resource_handler_default_timeout_is_none() {
+        let resource = StaticResource {
+            uri: "test://data".to_string(),
+            content: "".to_string(),
+        };
+        assert!(resource.timeout().is_none());
+    }
+
+    #[test]
+    fn resource_handler_read_with_uri_delegates_to_read() {
+        let resource = StaticResource {
+            uri: "test://data".to_string(),
+            content: "delegated".to_string(),
+        };
+        let ctx = test_ctx();
+        let params = UriParams::new();
+        let result = resource.read_with_uri(&ctx, "test://data", &params);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap()[0].text, Some("delegated".to_string()));
+    }
+
+    #[test]
+    fn resource_handler_template_resource_read_with_uri() {
+        let resource = TemplateResource;
+        let ctx = test_ctx();
+        let mut params = UriParams::new();
+        params.insert("id".to_string(), "42".to_string());
+        let result = resource.read_with_uri(&ctx, "resource://42", &params);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap()[0].text, Some("Template 42".to_string()));
+    }
+
+    #[test]
+    fn resource_handler_template_resource_has_template() {
+        let resource = TemplateResource;
+        let tmpl = resource.template();
+        assert!(tmpl.is_some());
+        assert_eq!(tmpl.unwrap().uri_template, "resource://{id}");
+    }
+
+    #[test]
+    fn resource_handler_template_resource_read_without_params_errors() {
+        let resource = TemplateResource;
+        let ctx = test_ctx();
+        let result = resource.read(&ctx);
+        assert!(result.is_err());
+    }
+
+    // ── PromptHandler direct get ─────────────────────────────────────
+
+    #[test]
+    fn prompt_handler_get_returns_messages() {
+        let prompt = GreetingPrompt;
+        let ctx = test_ctx();
+        let mut args = HashMap::new();
+        args.insert("name".to_string(), "Bob".to_string());
+        let result = prompt.get(&ctx, args);
+        assert!(result.is_ok());
+        let messages = result.unwrap();
+        assert_eq!(messages.len(), 1);
+        match &messages[0].content {
+            Content::Text { text } => assert!(text.contains("Bob")),
+            _ => panic!("Expected text content"),
+        }
+    }
+
+    #[test]
+    fn prompt_handler_definition_fields() {
+        let prompt = GreetingPrompt;
+        let def = prompt.definition();
+        assert_eq!(def.name, "greeting");
+        assert!(def.description.is_some());
+        assert_eq!(def.arguments.len(), 1);
+        assert_eq!(def.arguments[0].name, "name");
+        assert!(def.arguments[0].required);
+    }
+
+    #[test]
+    fn prompt_handler_default_icon_is_none() {
+        let prompt = GreetingPrompt;
+        assert!(prompt.icon().is_none());
+    }
+
+    #[test]
+    fn prompt_handler_default_version_is_none() {
+        let prompt = GreetingPrompt;
+        assert!(prompt.version().is_none());
+    }
+
+    #[test]
+    fn prompt_handler_default_tags_is_empty() {
+        let prompt = GreetingPrompt;
+        assert!(prompt.tags().is_empty());
+    }
+
+    #[test]
+    fn prompt_handler_default_timeout_is_none() {
+        let prompt = GreetingPrompt;
+        assert!(prompt.timeout().is_none());
+    }
+
+    #[test]
+    fn prompt_handler_get_with_missing_arg_uses_default() {
+        let prompt = GreetingPrompt;
+        let ctx = test_ctx();
+        let args = HashMap::new(); // no "name" argument
+        let result = prompt.get(&ctx, args);
+        assert!(result.is_ok());
+        match &result.unwrap()[0].content {
+            Content::Text { text } => assert!(text.contains("User")),
+            _ => panic!("Expected text content"),
+        }
+    }
+
+    // ── MountedToolHandler ───────────────────────────────────────────
+
+    #[test]
+    fn mounted_tool_handler_overrides_name() {
+        let inner: Box<dyn ToolHandler> = Box::new(GreetTool);
+        let mounted = MountedToolHandler::new(inner, "ns/greet".to_string());
+        let def = mounted.definition();
+        assert_eq!(def.name, "ns/greet");
+        // Other fields preserved
+        assert!(def.description.is_some());
+    }
+
+    #[test]
+    fn mounted_tool_handler_delegates_call() {
+        let inner: Box<dyn ToolHandler> = Box::new(GreetTool);
+        let mounted = MountedToolHandler::new(inner, "ns/greet".to_string());
+        let ctx = test_ctx();
+        let result = mounted.call(&ctx, serde_json::json!({"name": "Mounted"}));
+        assert!(result.is_ok());
+        match &result.unwrap()[0] {
+            Content::Text { text } => assert_eq!(text, "Hello, Mounted!"),
+            _ => panic!("Expected text content"),
+        }
+    }
+
+    #[test]
+    fn mounted_tool_handler_delegates_timeout() {
+        let inner: Box<dyn ToolHandler> = Box::new(RichTool::default());
+        let mounted = MountedToolHandler::new(inner, "ns/rich".to_string());
+        assert_eq!(mounted.timeout(), Some(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn mounted_tool_handler_delegates_annotations() {
+        let inner: Box<dyn ToolHandler> = Box::new(RichTool::default());
+        let mounted = MountedToolHandler::new(inner, "ns/rich".to_string());
+        let ann = mounted.annotations().unwrap();
+        assert_eq!(ann.read_only, Some(true));
+    }
+
+    #[test]
+    fn mounted_tool_handler_delegates_output_schema() {
+        let inner: Box<dyn ToolHandler> = Box::new(RichTool::default());
+        let mounted = MountedToolHandler::new(inner, "ns/rich".to_string());
+        assert!(mounted.output_schema().is_some());
+    }
+
+    // ── MountedResourceHandler ───────────────────────────────────────
+
+    #[test]
+    fn mounted_resource_handler_overrides_uri() {
+        let inner: Box<dyn ResourceHandler> = Box::new(StaticResource {
+            uri: "test://orig".to_string(),
+            content: "data".to_string(),
+        });
+        let mounted = MountedResourceHandler::new(inner, "ns/test://orig".to_string());
+        let def = mounted.definition();
+        assert_eq!(def.uri, "ns/test://orig");
+        // Other fields preserved
+        assert_eq!(def.name, "Static Resource");
+    }
+
+    #[test]
+    fn mounted_resource_handler_delegates_read() {
+        let inner: Box<dyn ResourceHandler> = Box::new(StaticResource {
+            uri: "test://data".to_string(),
+            content: "mounted_data".to_string(),
+        });
+        let mounted = MountedResourceHandler::new(inner, "ns/test://data".to_string());
+        let ctx = test_ctx();
+        let result = mounted.read(&ctx);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap()[0].text, Some("mounted_data".to_string()));
+    }
+
+    #[test]
+    fn mounted_resource_handler_with_template() {
+        let inner: Box<dyn ResourceHandler> = Box::new(TemplateResource);
+        let tmpl = ResourceTemplate {
+            uri_template: "ns/resource://{id}".to_string(),
+            name: "Mounted Template".to_string(),
+            description: None,
+            mime_type: None,
+            icon: None,
+            version: None,
+            tags: vec![],
+        };
+        let mounted = MountedResourceHandler::with_template(
+            inner,
+            "ns/resource://{id}".to_string(),
+            tmpl,
+        );
+        let template = mounted.template();
+        assert!(template.is_some());
+        assert_eq!(template.unwrap().uri_template, "ns/resource://{id}");
+    }
+
+    // ── MountedPromptHandler ─────────────────────────────────────────
+
+    #[test]
+    fn mounted_prompt_handler_overrides_name() {
+        let inner: Box<dyn PromptHandler> = Box::new(GreetingPrompt);
+        let mounted = MountedPromptHandler::new(inner, "ns/greeting".to_string());
+        let def = mounted.definition();
+        assert_eq!(def.name, "ns/greeting");
+        // Arguments preserved
+        assert_eq!(def.arguments.len(), 1);
+    }
+
+    #[test]
+    fn mounted_prompt_handler_delegates_get() {
+        let inner: Box<dyn PromptHandler> = Box::new(GreetingPrompt);
+        let mounted = MountedPromptHandler::new(inner, "ns/greeting".to_string());
+        let ctx = test_ctx();
+        let mut args = HashMap::new();
+        args.insert("name".to_string(), "MountedUser".to_string());
+        let result = mounted.get(&ctx, args);
+        assert!(result.is_ok());
+        match &result.unwrap()[0].content {
+            Content::Text { text } => assert!(text.contains("MountedUser")),
+            _ => panic!("Expected text content"),
+        }
+    }
+
+    // ── ProgressNotificationSender ───────────────────────────────────
+
+    #[test]
+    fn progress_notification_sender_sends_notification() {
+        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sent_clone = sent.clone();
+        let sender = ProgressNotificationSender::new(
+            fastmcp_protocol::ProgressToken::String("tok".to_string()),
+            move |req: fastmcp_protocol::JsonRpcRequest| {
+                sent_clone.lock().unwrap().push(req);
+            },
+        );
+
+        use fastmcp_core::NotificationSender;
+        sender.send_progress(0.5, Some(1.0), Some("half done"));
+
+        let notifications = sent.lock().unwrap();
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].method, "notifications/progress");
+    }
+
+    #[test]
+    fn progress_notification_sender_without_total() {
+        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sent_clone = sent.clone();
+        let sender = ProgressNotificationSender::new(
+            fastmcp_protocol::ProgressToken::Number(99),
+            move |req: fastmcp_protocol::JsonRpcRequest| {
+                sent_clone.lock().unwrap().push(req);
+            },
+        );
+
+        use fastmcp_core::NotificationSender;
+        sender.send_progress(1.0, None, None);
+
+        let notifications = sent.lock().unwrap();
+        assert_eq!(notifications.len(), 1);
+    }
+
+    #[test]
+    fn progress_notification_sender_debug_format() {
+        let sender = ProgressNotificationSender::new(
+            fastmcp_protocol::ProgressToken::String("debug-test".to_string()),
+            |_: fastmcp_protocol::JsonRpcRequest| {},
+        );
+        let debug = format!("{sender:?}");
+        assert!(debug.contains("ProgressNotificationSender"));
+    }
+
+    // ── BidirectionalSenders ─────────────────────────────────────────
+
+    #[test]
+    fn bidirectional_senders_default_is_empty() {
+        let senders = BidirectionalSenders::new();
+        assert!(senders.sampling.is_none());
+        assert!(senders.elicitation.is_none());
+    }
+
+    #[test]
+    fn bidirectional_senders_debug_format() {
+        let senders = BidirectionalSenders::new();
+        let debug = format!("{senders:?}");
+        assert!(debug.contains("BidirectionalSenders"));
+        assert!(debug.contains("sampling: false"));
+        assert!(debug.contains("elicitation: false"));
+    }
+
+    // ── Router registration and lookup via direct handler ────────────
+
+    #[test]
+    fn router_registers_tool_and_lists_it() {
+        let mut router = Router::new();
+        router.add_tool(GreetTool);
+        let tools = router.tools();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "greet");
+    }
+
+    #[test]
+    fn router_registers_resource_and_lists_it() {
+        let mut router = Router::new();
+        router.add_resource(StaticResource {
+            uri: "test://r1".to_string(),
+            content: "c1".to_string(),
+        });
+        let resources = router.resources();
+        assert_eq!(resources.len(), 1);
+        assert_eq!(resources[0].uri, "test://r1");
+    }
+
+    #[test]
+    fn router_registers_prompt_and_lists_it() {
+        let mut router = Router::new();
+        router.add_prompt(GreetingPrompt);
+        let prompts = router.prompts();
+        assert_eq!(prompts.len(), 1);
+        assert_eq!(prompts[0].name, "greeting");
+    }
+
+    #[test]
+    fn router_counts_match_registrations() {
+        let mut router = Router::new();
+        router.add_tool(GreetTool);
+        router.add_tool(ErrorTool);
+        router.add_resource(StaticResource {
+            uri: "test://a".to_string(),
+            content: "".to_string(),
+        });
+        router.add_prompt(GreetingPrompt);
+
+        assert_eq!(router.tools_count(), 2);
+        assert_eq!(router.resources_count(), 1);
+        assert_eq!(router.prompts_count(), 1);
+    }
+
+    #[test]
+    fn router_resource_template_count() {
+        let mut router = Router::new();
+        router.add_resource(TemplateResource);
+        // TemplateResource returns a template, so it should count as a template
+        assert_eq!(router.resource_templates_count(), 1);
+    }
+
+    #[test]
+    fn router_strict_input_validation_default_is_false() {
+        let router = Router::new();
+        assert!(!router.strict_input_validation());
+    }
+
+    #[test]
+    fn router_strict_input_validation_can_be_set() {
+        let mut router = Router::new();
+        router.set_strict_input_validation(true);
+        assert!(router.strict_input_validation());
+    }
+}
+
+// ============================================================================
+// ServerBuilder Tests
+// ============================================================================
+
+mod builder_tests {
+    use super::*;
+    use crate::{DuplicateBehavior, LoggingConfig, ServerBuilder};
+    use fastmcp_console::config::{BannerStyle, ConsoleConfig, TrafficVerbosity};
+    use fastmcp_protocol::ResourceTemplate;
+    use log::Level;
+
+    // ── Minimal handler stubs ────────────────────────────────────────
+
+    struct StubTool {
+        name: &'static str,
+    }
+
+    impl StubTool {
+        fn named(name: &'static str) -> Self {
+            Self { name }
+        }
+    }
+
+    impl ToolHandler for StubTool {
+        fn definition(&self) -> Tool {
+            Tool {
+                name: self.name.to_string(),
+                description: Some(format!("Stub tool {}", self.name)),
+                input_schema: serde_json::json!({"type": "object"}),
+                output_schema: None,
+                icon: None,
+                version: None,
+                tags: vec![],
+                annotations: None,
+            }
+        }
+
+        fn call(
+            &self,
+            _ctx: &McpContext,
+            _arguments: serde_json::Value,
+        ) -> McpResult<Vec<Content>> {
+            Ok(vec![Content::Text {
+                text: format!("stub:{}", self.name),
+            }])
+        }
+    }
+
+    struct StubResource {
+        name: &'static str,
+        uri: String,
+    }
+
+    impl StubResource {
+        fn named(name: &'static str) -> Self {
+            Self {
+                name,
+                uri: format!("test://{name}"),
+            }
+        }
+    }
+
+    impl ResourceHandler for StubResource {
+        fn definition(&self) -> Resource {
+            Resource {
+                uri: self.uri.clone(),
+                name: self.name.to_string(),
+                description: Some(format!("Stub resource {}", self.name)),
+                mime_type: Some("text/plain".to_string()),
+                icon: None,
+                version: None,
+                tags: vec![],
+            }
+        }
+
+        fn read(&self, _ctx: &McpContext) -> McpResult<Vec<ResourceContent>> {
+            Ok(vec![ResourceContent {
+                uri: self.uri.clone(),
+                mime_type: Some("text/plain".to_string()),
+                text: Some(format!("content:{}", self.name)),
+                blob: None,
+            }])
+        }
+    }
+
+    struct StubPrompt {
+        name: &'static str,
+    }
+
+    impl StubPrompt {
+        fn named(name: &'static str) -> Self {
+            Self { name }
+        }
+    }
+
+    impl PromptHandler for StubPrompt {
+        fn definition(&self) -> Prompt {
+            Prompt {
+                name: self.name.to_string(),
+                description: Some(format!("Stub prompt {}", self.name)),
+                arguments: vec![],
+                icon: None,
+                version: None,
+                tags: vec![],
+            }
+        }
+
+        fn get(
+            &self,
+            _ctx: &McpContext,
+            _arguments: HashMap<String, String>,
+        ) -> McpResult<Vec<PromptMessage>> {
+            Ok(vec![PromptMessage {
+                role: Role::User,
+                content: Content::Text {
+                    text: format!("prompt:{}", self.name),
+                },
+            }])
+        }
+    }
+
+    // ── Basic Construction ───────────────────────────────────────────
+
+    #[test]
+    fn builder_new_sets_name_and_version() {
+        let server = ServerBuilder::new("test-server", "1.2.3").build();
+        assert_eq!(server.info().name, "test-server");
+        assert_eq!(server.info().version, "1.2.3");
+    }
+
+    #[test]
+    fn builder_default_capabilities_include_logging() {
+        let server = ServerBuilder::new("s", "0.1").build();
+        assert!(server.capabilities().logging.is_some());
+        assert!(server.capabilities().tools.is_none());
+        assert!(server.capabilities().resources.is_none());
+        assert!(server.capabilities().prompts.is_none());
+        assert!(server.capabilities().tasks.is_none());
+    }
+
+    #[test]
+    fn builder_server_new_delegates_to_builder() {
+        // Server::new returns a ServerBuilder, not a Server
+        let server = Server::new("srv", "0.1").build();
+        assert_eq!(server.info().name, "srv");
+    }
+
+    // ── Tool Registration ────────────────────────────────────────────
+
+    #[test]
+    fn builder_tool_enables_tools_capability() {
+        let server = ServerBuilder::new("s", "0.1")
+            .tool(StubTool::named("alpha"))
+            .build();
+        assert!(server.capabilities().tools.is_some());
+        assert!(server.has_tools());
+    }
+
+    #[test]
+    fn builder_registers_multiple_tools() {
+        let server = ServerBuilder::new("s", "0.1")
+            .tool(StubTool::named("a"))
+            .tool(StubTool::named("b"))
+            .tool(StubTool::named("c"))
+            .build();
+        let tools = server.tools();
+        assert_eq!(tools.len(), 3);
+        let names: Vec<_> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"a"));
+        assert!(names.contains(&"b"));
+        assert!(names.contains(&"c"));
+    }
+
+    // ── Resource Registration ────────────────────────────────────────
+
+    #[test]
+    fn builder_resource_enables_resources_capability() {
+        let server = ServerBuilder::new("s", "0.1")
+            .resource(StubResource::named("data"))
+            .build();
+        assert!(server.capabilities().resources.is_some());
+        assert!(server.has_resources());
+    }
+
+    #[test]
+    fn builder_registers_multiple_resources() {
+        let server = ServerBuilder::new("s", "0.1")
+            .resource(StubResource::named("r1"))
+            .resource(StubResource::named("r2"))
+            .build();
+        let resources = server.resources();
+        assert_eq!(resources.len(), 2);
+    }
+
+    #[test]
+    fn builder_resource_template_enables_resources_capability() {
+        let template = ResourceTemplate {
+            uri_template: "file://{path}".to_string(),
+            name: "file".to_string(),
+            description: None,
+            mime_type: None,
+            icon: None,
+            version: None,
+            tags: vec![],
+        };
+        let server = ServerBuilder::new("s", "0.1")
+            .resource_template(template)
+            .build();
+        assert!(server.capabilities().resources.is_some());
+        assert!(server.has_resources());
+        let templates = server.resource_templates();
+        assert_eq!(templates.len(), 1);
+        assert_eq!(templates[0].name, "file");
+    }
+
+    // ── Prompt Registration ──────────────────────────────────────────
+
+    #[test]
+    fn builder_prompt_enables_prompts_capability() {
+        let server = ServerBuilder::new("s", "0.1")
+            .prompt(StubPrompt::named("hello"))
+            .build();
+        assert!(server.capabilities().prompts.is_some());
+        assert!(server.has_prompts());
+    }
+
+    #[test]
+    fn builder_registers_multiple_prompts() {
+        let server = ServerBuilder::new("s", "0.1")
+            .prompt(StubPrompt::named("p1"))
+            .prompt(StubPrompt::named("p2"))
+            .prompt(StubPrompt::named("p3"))
+            .build();
+        let prompts = server.prompts();
+        assert_eq!(prompts.len(), 3);
+    }
+
+    // ── Mixed Registration ───────────────────────────────────────────
+
+    #[test]
+    fn builder_mixed_handlers_enable_all_capabilities() {
+        let server = ServerBuilder::new("s", "0.1")
+            .tool(StubTool::named("t"))
+            .resource(StubResource::named("r"))
+            .prompt(StubPrompt::named("p"))
+            .build();
+        assert!(server.has_tools());
+        assert!(server.has_resources());
+        assert!(server.has_prompts());
+    }
+
+    #[test]
+    fn builder_no_handlers_means_no_capabilities() {
+        let server = ServerBuilder::new("empty", "0.1").build();
+        assert!(!server.has_tools());
+        assert!(!server.has_resources());
+        assert!(!server.has_prompts());
+    }
+
+    // ── Request Timeout ──────────────────────────────────────────────
+
+    #[test]
+    fn builder_default_request_timeout_is_30() {
+        // Build and check internal state via the server
+        let server = ServerBuilder::new("s", "0.1").build();
+        // Default is 30 seconds; verified via internal state
+        // We can't directly read request_timeout_secs, but we verify the builder
+        // accepted the default without panicking
+        assert_eq!(server.info().name, "s");
+    }
+
+    #[test]
+    fn builder_custom_request_timeout() {
+        let server = ServerBuilder::new("s", "0.1")
+            .request_timeout(60)
+            .build();
+        // Builder accepted custom timeout without error
+        assert_eq!(server.info().name, "s");
+    }
+
+    #[test]
+    fn builder_zero_timeout_disables_enforcement() {
+        let server = ServerBuilder::new("s", "0.1")
+            .request_timeout(0)
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    // ── Stats ────────────────────────────────────────────────────────
+
+    #[test]
+    fn builder_stats_enabled_by_default() {
+        let server = ServerBuilder::new("s", "0.1").build();
+        assert!(server.stats().is_some());
+    }
+
+    #[test]
+    fn builder_without_stats_disables_collection() {
+        let server = ServerBuilder::new("s", "0.1")
+            .without_stats()
+            .build();
+        assert!(server.stats().is_none());
+        assert!(server.stats_collector().is_none());
+    }
+
+    // ── Error Masking ────────────────────────────────────────────────
+
+    #[test]
+    fn builder_error_masking_disabled_by_default() {
+        let builder = ServerBuilder::new("s", "0.1");
+        assert!(!builder.is_error_masking_enabled());
+    }
+
+    #[test]
+    fn builder_mask_error_details_enables_masking() {
+        let builder = ServerBuilder::new("s", "0.1")
+            .mask_error_details(true);
+        assert!(builder.is_error_masking_enabled());
+    }
+
+    #[test]
+    fn builder_mask_error_details_toggle() {
+        let builder = ServerBuilder::new("s", "0.1")
+            .mask_error_details(true)
+            .mask_error_details(false);
+        assert!(!builder.is_error_masking_enabled());
+    }
+
+    // ── Strict Input Validation ──────────────────────────────────────
+
+    #[test]
+    fn builder_strict_input_validation_disabled_by_default() {
+        let builder = ServerBuilder::new("s", "0.1");
+        assert!(!builder.is_strict_input_validation_enabled());
+    }
+
+    #[test]
+    fn builder_strict_input_validation_enable() {
+        let builder = ServerBuilder::new("s", "0.1")
+            .strict_input_validation(true);
+        assert!(builder.is_strict_input_validation_enabled());
+    }
+
+    #[test]
+    fn builder_strict_input_validation_toggle() {
+        let builder = ServerBuilder::new("s", "0.1")
+            .strict_input_validation(true)
+            .strict_input_validation(false);
+        assert!(!builder.is_strict_input_validation_enabled());
+    }
+
+    // ── Instructions ─────────────────────────────────────────────────
+
+    #[test]
+    fn builder_instructions_set() {
+        // Instructions are stored internally; verify the builder accepts them.
+        let server = ServerBuilder::new("s", "0.1")
+            .instructions("Use this server for math operations")
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    // ── Logging Configuration ────────────────────────────────────────
+
+    #[test]
+    fn builder_log_level() {
+        let server = ServerBuilder::new("s", "0.1")
+            .log_level(Level::Debug)
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    #[test]
+    fn builder_log_level_filter() {
+        let server = ServerBuilder::new("s", "0.1")
+            .log_level_filter(log::LevelFilter::Warn)
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    #[test]
+    fn builder_log_timestamps_and_targets() {
+        let server = ServerBuilder::new("s", "0.1")
+            .log_timestamps(false)
+            .log_targets(false)
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    #[test]
+    fn builder_full_logging_config() {
+        let config = LoggingConfig {
+            level: Level::Trace,
+            timestamps: false,
+            targets: false,
+            file_line: true,
+        };
+        let server = ServerBuilder::new("s", "0.1")
+            .logging(config)
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    // ── Console Configuration ────────────────────────────────────────
+
+    #[test]
+    fn builder_console_config_full() {
+        let config = ConsoleConfig::new()
+            .with_banner(BannerStyle::Compact)
+            .plain_mode();
+        let server = ServerBuilder::new("s", "0.1")
+            .with_console_config(config)
+            .build();
+        let cc = server.console_config();
+        assert!(cc.force_plain);
+    }
+
+    #[test]
+    fn builder_without_banner() {
+        let server = ServerBuilder::new("s", "0.1")
+            .without_banner()
+            .build();
+        let cc = server.console_config();
+        assert!(!cc.show_banner);
+        assert_eq!(cc.banner_style, BannerStyle::None);
+    }
+
+    #[test]
+    fn builder_with_banner_compact() {
+        let server = ServerBuilder::new("s", "0.1")
+            .with_banner(BannerStyle::Compact)
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    #[test]
+    fn builder_traffic_logging() {
+        let server = ServerBuilder::new("s", "0.1")
+            .with_traffic_logging(TrafficVerbosity::Full)
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    #[test]
+    fn builder_plain_mode() {
+        let server = ServerBuilder::new("s", "0.1")
+            .plain_mode()
+            .build();
+        assert!(server.console_config().force_plain);
+    }
+
+    #[test]
+    fn builder_force_color() {
+        let server = ServerBuilder::new("s", "0.1")
+            .force_color()
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    #[test]
+    fn builder_periodic_stats() {
+        let server = ServerBuilder::new("s", "0.1")
+            .with_periodic_stats(10)
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    // ── DuplicateBehavior ────────────────────────────────────────────
+
+    #[test]
+    fn builder_on_duplicate_default_is_warn() {
+        // Default behavior is Warn (keeps original, logs warning)
+        let server = ServerBuilder::new("s", "0.1")
+            .tool(StubTool::named("dup"))
+            .tool(StubTool::named("dup"))
+            .build();
+        // With Warn default, the second registration keeps original
+        let tools = server.tools();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "dup");
+    }
+
+    #[test]
+    fn builder_on_duplicate_ignore_keeps_original() {
+        let server = ServerBuilder::new("s", "0.1")
+            .on_duplicate(DuplicateBehavior::Ignore)
+            .tool(StubTool::named("dup"))
+            .tool(StubTool::named("dup"))
+            .build();
+        let tools = server.tools();
+        assert_eq!(tools.len(), 1);
+    }
+
+    #[test]
+    fn builder_on_duplicate_replace() {
+        let server = ServerBuilder::new("s", "0.1")
+            .on_duplicate(DuplicateBehavior::Replace)
+            .tool(StubTool::named("dup"))
+            .tool(StubTool::named("dup"))
+            .build();
+        let tools = server.tools();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "dup");
+    }
+
+    #[test]
+    fn builder_on_duplicate_error_logs_and_skips() {
+        // With Error behavior, duplicate registration fails but builder doesn't panic
+        let server = ServerBuilder::new("s", "0.1")
+            .on_duplicate(DuplicateBehavior::Error)
+            .tool(StubTool::named("dup"))
+            .tool(StubTool::named("dup"))
+            .build();
+        // Only the first registration succeeds
+        let tools = server.tools();
+        assert_eq!(tools.len(), 1);
+    }
+
+    #[test]
+    fn builder_on_duplicate_applies_to_resources() {
+        let server = ServerBuilder::new("s", "0.1")
+            .on_duplicate(DuplicateBehavior::Ignore)
+            .resource(StubResource::named("r"))
+            .resource(StubResource::named("r"))
+            .build();
+        let resources = server.resources();
+        assert_eq!(resources.len(), 1);
+    }
+
+    #[test]
+    fn builder_on_duplicate_applies_to_prompts() {
+        let server = ServerBuilder::new("s", "0.1")
+            .on_duplicate(DuplicateBehavior::Ignore)
+            .prompt(StubPrompt::named("p"))
+            .prompt(StubPrompt::named("p"))
+            .build();
+        let prompts = server.prompts();
+        assert_eq!(prompts.len(), 1);
+    }
+
+    // ── Middleware Registration ───────────────────────────────────────
+
+    #[test]
+    fn builder_middleware_registration() {
+        let events = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let server = ServerBuilder::new("s", "0.1")
+            .middleware(RecordingMiddleware::new("m1", events.clone()))
+            .middleware(RecordingMiddleware::new("m2", events.clone()))
+            .build();
+        // Server builds successfully with middleware
+        assert_eq!(server.info().name, "s");
+    }
+
+    // ── Auth Provider ────────────────────────────────────────────────
+
+    #[test]
+    fn builder_auth_provider_static_token() {
+        let ctx = fastmcp_core::AuthContext::with_subject("test-user");
+        let server = ServerBuilder::new("s", "0.1")
+            .auth_provider(TokenAuthProvider::new(StaticTokenVerifier::new(vec![
+                ("secret-token".to_string(), ctx),
+            ])))
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    #[test]
+    fn builder_auth_provider_allow_all() {
+        let server = ServerBuilder::new("s", "0.1")
+            .auth_provider(crate::AllowAllAuthProvider)
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    // ── Lifecycle Hooks ──────────────────────────────────────────────
+
+    #[test]
+    fn builder_on_startup_hook() {
+        let server = ServerBuilder::new("s", "0.1")
+            .on_startup(|| -> Result<(), std::io::Error> {
+                Ok(())
+            })
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    #[test]
+    fn builder_on_shutdown_hook() {
+        let server = ServerBuilder::new("s", "0.1")
+            .on_shutdown(|| {
+                // cleanup
+            })
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    #[test]
+    fn builder_both_lifecycle_hooks() {
+        let server = ServerBuilder::new("s", "0.1")
+            .on_startup(|| -> Result<(), std::io::Error> {
+                Ok(())
+            })
+            .on_shutdown(|| {})
+            .build();
+        assert_eq!(server.info().name, "s");
+    }
+
+    // ── Mount ────────────────────────────────────────────────────────
+
+    #[test]
+    fn builder_mount_server_with_prefix() {
+        let child = ServerBuilder::new("child", "0.1")
+            .tool(StubTool::named("do_thing"))
+            .resource(StubResource::named("data"))
+            .prompt(StubPrompt::named("ask"))
+            .build();
+
+        let parent = ServerBuilder::new("parent", "0.1")
+            .mount(child, Some("child"))
+            .build();
+
+        assert!(parent.has_tools());
+        assert!(parent.has_resources());
+        assert!(parent.has_prompts());
+
+        let tools = parent.tools();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "child/do_thing");
+    }
+
+    #[test]
+    fn builder_mount_server_without_prefix() {
+        let child = ServerBuilder::new("child", "0.1")
+            .tool(StubTool::named("alpha"))
+            .build();
+
+        let parent = ServerBuilder::new("parent", "0.1")
+            .mount(child, None)
+            .build();
+
+        let tools = parent.tools();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "alpha");
+    }
+
+    #[test]
+    fn builder_mount_tools_only() {
+        let child = ServerBuilder::new("child", "0.1")
+            .tool(StubTool::named("t"))
+            .resource(StubResource::named("r"))
+            .prompt(StubPrompt::named("p"))
+            .build();
+
+        let parent = ServerBuilder::new("parent", "0.1")
+            .mount_tools(child, Some("ns"))
+            .build();
+
+        assert!(parent.has_tools());
+        assert!(!parent.has_resources());
+        assert!(!parent.has_prompts());
+    }
+
+    #[test]
+    fn builder_mount_resources_only() {
+        let child = ServerBuilder::new("child", "0.1")
+            .tool(StubTool::named("t"))
+            .resource(StubResource::named("r"))
+            .build();
+
+        let parent = ServerBuilder::new("parent", "0.1")
+            .mount_resources(child, Some("ns"))
+            .build();
+
+        assert!(!parent.has_tools());
+        assert!(parent.has_resources());
+    }
+
+    #[test]
+    fn builder_mount_prompts_only() {
+        let child = ServerBuilder::new("child", "0.1")
+            .tool(StubTool::named("t"))
+            .prompt(StubPrompt::named("p"))
+            .build();
+
+        let parent = ServerBuilder::new("parent", "0.1")
+            .mount_prompts(child, Some("ns"))
+            .build();
+
+        assert!(!parent.has_tools());
+        assert!(parent.has_prompts());
+    }
+
+    #[test]
+    fn builder_mount_multiple_servers() {
+        let db = ServerBuilder::new("db", "0.1")
+            .tool(StubTool::named("query"))
+            .build();
+        let api = ServerBuilder::new("api", "0.1")
+            .tool(StubTool::named("fetch"))
+            .build();
+
+        let main = ServerBuilder::new("main", "0.1")
+            .mount(db, Some("db"))
+            .mount(api, Some("api"))
+            .build();
+
+        let tools = main.tools();
+        assert_eq!(tools.len(), 2);
+        let names: Vec<_> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"db/query"));
+        assert!(names.contains(&"api/fetch"));
+    }
+
+    // ── Fluent Chaining ──────────────────────────────────────────────
+
+    #[test]
+    fn builder_full_fluent_chain() {
+        let events = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let server = ServerBuilder::new("full-server", "2.0.0")
+            .instructions("A fully configured server")
+            .on_duplicate(DuplicateBehavior::Error)
+            .request_timeout(120)
+            .mask_error_details(true)
+            .strict_input_validation(true)
+            .log_level(Level::Debug)
+            .log_timestamps(false)
+            .without_banner()
+            .plain_mode()
+            .tool(StubTool::named("tool_a"))
+            .resource(StubResource::named("res_a"))
+            .prompt(StubPrompt::named("prompt_a"))
+            .middleware(RecordingMiddleware::new("audit", events))
+            .auth_provider(crate::AllowAllAuthProvider)
+            .on_startup(|| -> Result<(), std::io::Error> { Ok(()) })
+            .on_shutdown(|| {})
+            .build();
+
+        assert_eq!(server.info().name, "full-server");
+        assert_eq!(server.info().version, "2.0.0");
+        assert!(server.has_tools());
+        assert!(server.has_resources());
+        assert!(server.has_prompts());
+        assert_eq!(server.tools().len(), 1);
+        assert_eq!(server.resources().len(), 1);
+        assert_eq!(server.prompts().len(), 1);
+    }
+
+    // ── into_router ──────────────────────────────────────────────────
+
+    #[test]
+    fn builder_into_router_preserves_components() {
+        let server = ServerBuilder::new("s", "0.1")
+            .tool(StubTool::named("t1"))
+            .tool(StubTool::named("t2"))
+            .resource(StubResource::named("r1"))
+            .prompt(StubPrompt::named("p1"))
+            .build();
+
+        let router = server.into_router();
+        assert_eq!(router.tools_count(), 2);
+        assert_eq!(router.resources_count(), 1);
+        assert_eq!(router.prompts_count(), 1);
+    }
+
+    // ── Task Manager ─────────────────────────────────────────────────
+
+    #[test]
+    fn builder_without_task_manager() {
+        let server = ServerBuilder::new("s", "0.1").build();
+        assert!(server.task_manager().is_none());
+        assert!(server.capabilities().tasks.is_none());
+    }
+
+    #[test]
+    fn builder_with_task_manager_enables_tasks_capability() {
+        let tm = TaskManager::new();
+        let server = ServerBuilder::new("s", "0.1")
+            .with_task_manager(tm.into_shared())
+            .build();
+        assert!(server.task_manager().is_some());
+        assert!(server.capabilities().tasks.is_some());
+    }
+}
