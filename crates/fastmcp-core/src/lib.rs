@@ -29,6 +29,7 @@
 mod auth;
 pub mod combinator;
 mod context;
+mod duration;
 mod error;
 pub mod logging;
 pub mod runtime;

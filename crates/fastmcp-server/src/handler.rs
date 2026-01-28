@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use fastmcp_core::{
     McpContext, McpOutcome, McpResult, NotificationSender, Outcome, ProgressReporter, SessionState,
@@ -247,6 +248,17 @@ pub trait ToolHandler: Send + Sync {
         None
     }
 
+    /// Returns the tool's custom timeout duration.
+    ///
+    /// Default implementation returns `None`, meaning the server's default
+    /// timeout applies. Override to specify a per-handler timeout.
+    ///
+    /// When set, creates a child budget with the specified timeout that
+    /// overrides the server's default timeout for this handler.
+    fn timeout(&self) -> Option<Duration> {
+        None
+    }
+
     /// Calls the tool synchronously with the given arguments.
     ///
     /// This is the default implementation point. Override this for simple
@@ -323,6 +335,14 @@ pub trait ResourceHandler: Send + Sync {
     /// Note: Tags can also be set directly in `definition()`.
     fn tags(&self) -> &[String] {
         &[]
+    }
+
+    /// Returns the resource's custom timeout duration.
+    ///
+    /// Default implementation returns `None`, meaning the server's default
+    /// timeout applies. Override to specify a per-handler timeout.
+    fn timeout(&self) -> Option<Duration> {
+        None
     }
 
     /// Reads the resource content synchronously.
@@ -427,6 +447,14 @@ pub trait PromptHandler: Send + Sync {
         &[]
     }
 
+    /// Returns the prompt's custom timeout duration.
+    ///
+    /// Default implementation returns `None`, meaning the server's default
+    /// timeout applies. Override to specify a per-handler timeout.
+    fn timeout(&self) -> Option<Duration> {
+        None
+    }
+
     /// Gets the prompt messages synchronously with the given arguments.
     ///
     /// This is the default implementation point. Override this for simple
@@ -506,6 +534,10 @@ impl ToolHandler for MountedToolHandler {
         self.inner.annotations()
     }
 
+    fn timeout(&self) -> Option<Duration> {
+        self.inner.timeout()
+    }
+
     fn call(&self, ctx: &McpContext, arguments: serde_json::Value) -> McpResult<Vec<Content>> {
         self.inner.call(ctx, arguments)
     }
@@ -567,6 +599,10 @@ impl ResourceHandler for MountedResourceHandler {
         self.inner.tags()
     }
 
+    fn timeout(&self) -> Option<Duration> {
+        self.inner.timeout()
+    }
+
     fn read(&self, ctx: &McpContext) -> McpResult<Vec<ResourceContent>> {
         self.inner.read(ctx)
     }
@@ -624,6 +660,10 @@ impl PromptHandler for MountedPromptHandler {
 
     fn tags(&self) -> &[String] {
         self.inner.tags()
+    }
+
+    fn timeout(&self) -> Option<Duration> {
+        self.inner.timeout()
     }
 
     fn get(
