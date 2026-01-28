@@ -1239,6 +1239,158 @@ impl McpContext {
     }
 
     // ========================================================================
+    // Dynamic Component Enable/Disable
+    // ========================================================================
+
+    /// Session state key for disabled tools.
+    const DISABLED_TOOLS_KEY: &'static str = "fastmcp.disabled_tools";
+    /// Session state key for disabled resources.
+    const DISABLED_RESOURCES_KEY: &'static str = "fastmcp.disabled_resources";
+    /// Session state key for disabled prompts.
+    const DISABLED_PROMPTS_KEY: &'static str = "fastmcp.disabled_prompts";
+
+    /// Disables a tool for this session.
+    ///
+    /// Disabled tools will not appear in `tools/list` responses and will return
+    /// an error if called directly. This is useful for adapting available
+    /// functionality based on user permissions, feature flags, or runtime conditions.
+    ///
+    /// Returns `true` if the operation succeeded, `false` if session state is unavailable.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// async fn my_tool(ctx: &McpContext) -> McpResult<String> {
+    ///     // Disable the "admin_tool" for this session
+    ///     ctx.disable_tool("admin_tool");
+    ///     Ok("Admin tool disabled".to_string())
+    /// }
+    /// ```
+    pub fn disable_tool(&self, name: impl Into<String>) -> bool {
+        self.add_to_disabled_set(Self::DISABLED_TOOLS_KEY, name.into())
+    }
+
+    /// Enables a previously disabled tool for this session.
+    ///
+    /// Returns `true` if the operation succeeded, `false` if session state is unavailable.
+    pub fn enable_tool(&self, name: &str) -> bool {
+        self.remove_from_disabled_set(Self::DISABLED_TOOLS_KEY, name)
+    }
+
+    /// Returns whether a tool is enabled (not disabled) for this session.
+    ///
+    /// Tools are enabled by default unless explicitly disabled.
+    #[must_use]
+    pub fn is_tool_enabled(&self, name: &str) -> bool {
+        !self.is_in_disabled_set(Self::DISABLED_TOOLS_KEY, name)
+    }
+
+    /// Disables a resource for this session.
+    ///
+    /// Disabled resources will not appear in `resources/list` responses and will
+    /// return an error if read directly.
+    ///
+    /// Returns `true` if the operation succeeded, `false` if session state is unavailable.
+    pub fn disable_resource(&self, uri: impl Into<String>) -> bool {
+        self.add_to_disabled_set(Self::DISABLED_RESOURCES_KEY, uri.into())
+    }
+
+    /// Enables a previously disabled resource for this session.
+    ///
+    /// Returns `true` if the operation succeeded, `false` if session state is unavailable.
+    pub fn enable_resource(&self, uri: &str) -> bool {
+        self.remove_from_disabled_set(Self::DISABLED_RESOURCES_KEY, uri)
+    }
+
+    /// Returns whether a resource is enabled (not disabled) for this session.
+    ///
+    /// Resources are enabled by default unless explicitly disabled.
+    #[must_use]
+    pub fn is_resource_enabled(&self, uri: &str) -> bool {
+        !self.is_in_disabled_set(Self::DISABLED_RESOURCES_KEY, uri)
+    }
+
+    /// Disables a prompt for this session.
+    ///
+    /// Disabled prompts will not appear in `prompts/list` responses and will
+    /// return an error if retrieved directly.
+    ///
+    /// Returns `true` if the operation succeeded, `false` if session state is unavailable.
+    pub fn disable_prompt(&self, name: impl Into<String>) -> bool {
+        self.add_to_disabled_set(Self::DISABLED_PROMPTS_KEY, name.into())
+    }
+
+    /// Enables a previously disabled prompt for this session.
+    ///
+    /// Returns `true` if the operation succeeded, `false` if session state is unavailable.
+    pub fn enable_prompt(&self, name: &str) -> bool {
+        self.remove_from_disabled_set(Self::DISABLED_PROMPTS_KEY, name)
+    }
+
+    /// Returns whether a prompt is enabled (not disabled) for this session.
+    ///
+    /// Prompts are enabled by default unless explicitly disabled.
+    #[must_use]
+    pub fn is_prompt_enabled(&self, name: &str) -> bool {
+        !self.is_in_disabled_set(Self::DISABLED_PROMPTS_KEY, name)
+    }
+
+    /// Returns the set of disabled tools for this session.
+    #[must_use]
+    pub fn disabled_tools(&self) -> std::collections::HashSet<String> {
+        self.get_disabled_set(Self::DISABLED_TOOLS_KEY)
+    }
+
+    /// Returns the set of disabled resources for this session.
+    #[must_use]
+    pub fn disabled_resources(&self) -> std::collections::HashSet<String> {
+        self.get_disabled_set(Self::DISABLED_RESOURCES_KEY)
+    }
+
+    /// Returns the set of disabled prompts for this session.
+    #[must_use]
+    pub fn disabled_prompts(&self) -> std::collections::HashSet<String> {
+        self.get_disabled_set(Self::DISABLED_PROMPTS_KEY)
+    }
+
+    // Helper: Add a name to a disabled set
+    fn add_to_disabled_set(&self, key: &str, name: String) -> bool {
+        let Some(state) = self.state.as_ref() else {
+            return false;
+        };
+        let mut set: std::collections::HashSet<String> = state.get(key).unwrap_or_default();
+        set.insert(name);
+        state.set(key, set)
+    }
+
+    // Helper: Remove a name from a disabled set
+    fn remove_from_disabled_set(&self, key: &str, name: &str) -> bool {
+        let Some(state) = self.state.as_ref() else {
+            return false;
+        };
+        let mut set: std::collections::HashSet<String> = state.get(key).unwrap_or_default();
+        set.remove(name);
+        state.set(key, set)
+    }
+
+    // Helper: Check if a name is in a disabled set
+    fn is_in_disabled_set(&self, key: &str, name: &str) -> bool {
+        let Some(state) = self.state.as_ref() else {
+            return false;
+        };
+        let set: std::collections::HashSet<String> = state.get(key).unwrap_or_default();
+        set.contains(name)
+    }
+
+    // Helper: Get the full disabled set
+    fn get_disabled_set(&self, key: &str) -> std::collections::HashSet<String> {
+        self.state
+            .as_ref()
+            .and_then(|s| s.get(key))
+            .unwrap_or_default()
+    }
+
+    // ========================================================================
     // Sampling (LLM Completions)
     // ========================================================================
 
@@ -2127,5 +2279,141 @@ mod tests {
 
         assert!(ctx.has_session_state());
         assert!(ctx.has_progress_reporter());
+    }
+
+    // ========================================================================
+    // Dynamic Enable/Disable Tests
+    // ========================================================================
+
+    #[test]
+    fn test_mcp_context_tools_enabled_by_default() {
+        let cx = Cx::for_testing();
+        let state = SessionState::new();
+        let ctx = McpContext::with_state(cx, 1, state);
+
+        assert!(ctx.is_tool_enabled("any_tool"));
+        assert!(ctx.is_tool_enabled("another_tool"));
+    }
+
+    #[test]
+    fn test_mcp_context_disable_enable_tool() {
+        let cx = Cx::for_testing();
+        let state = SessionState::new();
+        let ctx = McpContext::with_state(cx, 1, state);
+
+        // Tool is enabled by default
+        assert!(ctx.is_tool_enabled("my_tool"));
+
+        // Disable the tool
+        assert!(ctx.disable_tool("my_tool"));
+        assert!(!ctx.is_tool_enabled("my_tool"));
+        assert!(ctx.is_tool_enabled("other_tool"));
+
+        // Re-enable the tool
+        assert!(ctx.enable_tool("my_tool"));
+        assert!(ctx.is_tool_enabled("my_tool"));
+    }
+
+    #[test]
+    fn test_mcp_context_disable_enable_resource() {
+        let cx = Cx::for_testing();
+        let state = SessionState::new();
+        let ctx = McpContext::with_state(cx, 1, state);
+
+        // Resource is enabled by default
+        assert!(ctx.is_resource_enabled("file://secret"));
+
+        // Disable the resource
+        assert!(ctx.disable_resource("file://secret"));
+        assert!(!ctx.is_resource_enabled("file://secret"));
+        assert!(ctx.is_resource_enabled("file://public"));
+
+        // Re-enable the resource
+        assert!(ctx.enable_resource("file://secret"));
+        assert!(ctx.is_resource_enabled("file://secret"));
+    }
+
+    #[test]
+    fn test_mcp_context_disable_enable_prompt() {
+        let cx = Cx::for_testing();
+        let state = SessionState::new();
+        let ctx = McpContext::with_state(cx, 1, state);
+
+        // Prompt is enabled by default
+        assert!(ctx.is_prompt_enabled("admin_prompt"));
+
+        // Disable the prompt
+        assert!(ctx.disable_prompt("admin_prompt"));
+        assert!(!ctx.is_prompt_enabled("admin_prompt"));
+        assert!(ctx.is_prompt_enabled("user_prompt"));
+
+        // Re-enable the prompt
+        assert!(ctx.enable_prompt("admin_prompt"));
+        assert!(ctx.is_prompt_enabled("admin_prompt"));
+    }
+
+    #[test]
+    fn test_mcp_context_disable_multiple_tools() {
+        let cx = Cx::for_testing();
+        let state = SessionState::new();
+        let ctx = McpContext::with_state(cx, 1, state);
+
+        ctx.disable_tool("tool1");
+        ctx.disable_tool("tool2");
+        ctx.disable_tool("tool3");
+
+        assert!(!ctx.is_tool_enabled("tool1"));
+        assert!(!ctx.is_tool_enabled("tool2"));
+        assert!(!ctx.is_tool_enabled("tool3"));
+        assert!(ctx.is_tool_enabled("tool4"));
+
+        let disabled = ctx.disabled_tools();
+        assert_eq!(disabled.len(), 3);
+        assert!(disabled.contains("tool1"));
+        assert!(disabled.contains("tool2"));
+        assert!(disabled.contains("tool3"));
+    }
+
+    #[test]
+    fn test_mcp_context_disabled_sets_empty_by_default() {
+        let cx = Cx::for_testing();
+        let state = SessionState::new();
+        let ctx = McpContext::with_state(cx, 1, state);
+
+        assert!(ctx.disabled_tools().is_empty());
+        assert!(ctx.disabled_resources().is_empty());
+        assert!(ctx.disabled_prompts().is_empty());
+    }
+
+    #[test]
+    fn test_mcp_context_enable_disable_no_state() {
+        let cx = Cx::for_testing();
+        let ctx = McpContext::new(cx, 1);
+
+        // Without session state, disable returns false
+        assert!(!ctx.disable_tool("tool"));
+        assert!(!ctx.enable_tool("tool"));
+
+        // But is_enabled returns true (default is enabled)
+        assert!(ctx.is_tool_enabled("tool"));
+    }
+
+    #[test]
+    fn test_mcp_context_disabled_state_persists_across_contexts() {
+        let state = SessionState::new();
+
+        // First context disables a tool
+        {
+            let cx = Cx::for_testing();
+            let ctx = McpContext::with_state(cx, 1, state.clone());
+            ctx.disable_tool("shared_tool");
+        }
+
+        // Second context (same session state) sees the disabled tool
+        {
+            let cx = Cx::for_testing();
+            let ctx = McpContext::with_state(cx, 2, state.clone());
+            assert!(!ctx.is_tool_enabled("shared_tool"));
+        }
     }
 }

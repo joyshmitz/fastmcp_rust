@@ -292,10 +292,42 @@ impl Router {
         self.tools.values().map(|h| h.definition()).collect()
     }
 
+    /// Returns tool definitions filtered by session state.
+    ///
+    /// Tools that have been disabled in the session state will not be included.
+    #[must_use]
+    pub fn tools_filtered(&self, session_state: Option<&SessionState>) -> Vec<Tool> {
+        match session_state {
+            Some(state) => self
+                .tools
+                .values()
+                .filter(|h| state.is_tool_enabled(&h.definition().name))
+                .map(|h| h.definition())
+                .collect(),
+            None => self.tools(),
+        }
+    }
+
     /// Returns all resource definitions.
     #[must_use]
     pub fn resources(&self) -> Vec<Resource> {
         self.resources.values().map(|h| h.definition()).collect()
+    }
+
+    /// Returns resource definitions filtered by session state.
+    ///
+    /// Resources that have been disabled in the session state will not be included.
+    #[must_use]
+    pub fn resources_filtered(&self, session_state: Option<&SessionState>) -> Vec<Resource> {
+        match session_state {
+            Some(state) => self
+                .resources
+                .values()
+                .filter(|h| state.is_resource_enabled(&h.definition().uri))
+                .map(|h| h.definition())
+                .collect(),
+            None => self.resources(),
+        }
     }
 
     /// Returns all resource templates.
@@ -310,10 +342,51 @@ impl Router {
         templates
     }
 
+    /// Returns resource templates filtered by session state.
+    ///
+    /// Templates that have been disabled in the session state will not be included.
+    #[must_use]
+    pub fn resource_templates_filtered(
+        &self,
+        session_state: Option<&SessionState>,
+    ) -> Vec<ResourceTemplate> {
+        let mut templates: Vec<ResourceTemplate> = match session_state {
+            Some(state) => self
+                .resource_templates
+                .values()
+                .filter(|entry| state.is_resource_enabled(&entry.template.uri_template))
+                .map(|entry| entry.template.clone())
+                .collect(),
+            None => self
+                .resource_templates
+                .values()
+                .map(|entry| entry.template.clone())
+                .collect(),
+        };
+        templates.sort_by(|a, b| a.uri_template.cmp(&b.uri_template));
+        templates
+    }
+
     /// Returns all prompt definitions.
     #[must_use]
     pub fn prompts(&self) -> Vec<Prompt> {
         self.prompts.values().map(|h| h.definition()).collect()
+    }
+
+    /// Returns prompt definitions filtered by session state.
+    ///
+    /// Prompts that have been disabled in the session state will not be included.
+    #[must_use]
+    pub fn prompts_filtered(&self, session_state: Option<&SessionState>) -> Vec<Prompt> {
+        match session_state {
+            Some(state) => self
+                .prompts
+                .values()
+                .filter(|h| state.is_prompt_enabled(&h.definition().name))
+                .map(|h| h.definition())
+                .collect(),
+            None => self.prompts(),
+        }
     }
 
     /// Returns the number of registered tools.
@@ -428,13 +501,16 @@ impl Router {
     }
 
     /// Handles the tools/list request.
+    ///
+    /// If session_state is provided, disabled tools will be filtered out.
     pub fn handle_tools_list(
         &self,
         _cx: &Cx,
         _params: ListToolsParams,
+        session_state: Option<&SessionState>,
     ) -> McpResult<ListToolsResult> {
         Ok(ListToolsResult {
-            tools: self.tools(),
+            tools: self.tools_filtered(session_state),
             next_cursor: None,
         })
     }
@@ -473,6 +549,14 @@ impl Router {
             return Err(McpError::new(
                 McpErrorCode::RequestCancelled,
                 "Request budget exhausted",
+            ));
+        }
+
+        // Check if tool is disabled for this session
+        if !session_state.is_tool_enabled(&params.name) {
+            return Err(McpError::new(
+                McpErrorCode::MethodNotFound,
+                format!("Tool '{}' is disabled for this session", params.name),
             ));
         }
 
@@ -565,25 +649,31 @@ impl Router {
     }
 
     /// Handles the resources/list request.
+    ///
+    /// If session_state is provided, disabled resources will be filtered out.
     pub fn handle_resources_list(
         &self,
         _cx: &Cx,
         _params: ListResourcesParams,
+        session_state: Option<&SessionState>,
     ) -> McpResult<ListResourcesResult> {
         Ok(ListResourcesResult {
-            resources: self.resources(),
+            resources: self.resources_filtered(session_state),
             next_cursor: None,
         })
     }
 
     /// Handles the resources/templates/list request.
+    ///
+    /// If session_state is provided, disabled resource templates will be filtered out.
     pub fn handle_resource_templates_list(
         &self,
         _cx: &Cx,
         _params: ListResourceTemplatesParams,
+        session_state: Option<&SessionState>,
     ) -> McpResult<ListResourceTemplatesResult> {
         Ok(ListResourceTemplatesResult {
-            resource_templates: self.resource_templates(),
+            resource_templates: self.resource_templates_filtered(session_state),
         })
     }
 
@@ -620,6 +710,14 @@ impl Router {
             return Err(McpError::new(
                 McpErrorCode::RequestCancelled,
                 "Request budget exhausted",
+            ));
+        }
+
+        // Check if resource is disabled for this session
+        if !session_state.is_resource_enabled(&params.uri) {
+            return Err(McpError::new(
+                McpErrorCode::ResourceNotFound,
+                format!("Resource '{}' is disabled for this session", params.uri),
             ));
         }
 
@@ -675,13 +773,16 @@ impl Router {
     }
 
     /// Handles the prompts/list request.
+    ///
+    /// If session_state is provided, disabled prompts will be filtered out.
     pub fn handle_prompts_list(
         &self,
         _cx: &Cx,
         _params: ListPromptsParams,
+        session_state: Option<&SessionState>,
     ) -> McpResult<ListPromptsResult> {
         Ok(ListPromptsResult {
-            prompts: self.prompts(),
+            prompts: self.prompts_filtered(session_state),
             next_cursor: None,
         })
     }
@@ -720,6 +821,14 @@ impl Router {
             return Err(McpError::new(
                 McpErrorCode::RequestCancelled,
                 "Request budget exhausted",
+            ));
+        }
+
+        // Check if prompt is disabled for this session
+        if !session_state.is_prompt_enabled(&params.name) {
+            return Err(McpError::new(
+                McpErrorCode::PromptNotFound,
+                format!("Prompt '{}' is disabled for this session", params.name),
             ));
         }
 

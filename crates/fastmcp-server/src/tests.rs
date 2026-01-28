@@ -1300,13 +1300,103 @@ mod router_tests {
         assert!(template_uris.contains(&"resource://{name}"));
     }
 
+    // ========================================================================
+    // Dynamic Enable/Disable Filtering Tests
+    // ========================================================================
+
+    #[test]
+    fn test_router_tools_filtered_with_disabled() {
+        let router = create_test_router();
+        let state = SessionState::new();
+
+        // All tools visible without filtering
+        let all_tools = router.tools_filtered(None);
+        assert_eq!(all_tools.len(), 4);
+
+        // Disable a tool
+        let mut disabled: std::collections::HashSet<String> = std::collections::HashSet::new();
+        disabled.insert("greet".to_string());
+        state.set("fastmcp.disabled_tools", disabled);
+
+        // Now filtered list should have one less tool
+        let filtered_tools = router.tools_filtered(Some(&state));
+        assert_eq!(filtered_tools.len(), 3);
+        assert!(!filtered_tools.iter().any(|t| t.name == "greet"));
+        assert!(filtered_tools.iter().any(|t| t.name == "slow_tool"));
+    }
+
+    #[test]
+    fn test_router_resources_filtered_with_disabled() {
+        let router = create_test_router();
+        let state = SessionState::new();
+
+        // All resources visible without filtering
+        let all_resources = router.resources_filtered(None);
+        assert_eq!(all_resources.len(), 2);
+
+        // Disable a resource
+        let mut disabled: std::collections::HashSet<String> = std::collections::HashSet::new();
+        disabled.insert("resource://test".to_string());
+        state.set("fastmcp.disabled_resources", disabled);
+
+        // Now filtered list should have one less resource
+        let filtered_resources = router.resources_filtered(Some(&state));
+        assert_eq!(filtered_resources.len(), 1);
+        assert!(!filtered_resources.iter().any(|r| r.uri == "resource://test"));
+        assert!(filtered_resources.iter().any(|r| r.uri == "resource://cancellable"));
+    }
+
+    #[test]
+    fn test_router_prompts_filtered_with_disabled() {
+        let router = create_test_router();
+        let state = SessionState::new();
+
+        // All prompts visible without filtering
+        let all_prompts = router.prompts_filtered(None);
+        assert_eq!(all_prompts.len(), 1);
+
+        // Disable the "greeting" prompt (that's its actual name)
+        let mut disabled: std::collections::HashSet<String> = std::collections::HashSet::new();
+        disabled.insert("greeting".to_string());
+        state.set("fastmcp.disabled_prompts", disabled);
+
+        // Now filtered list should be empty
+        let filtered_prompts = router.prompts_filtered(Some(&state));
+        assert_eq!(filtered_prompts.len(), 0);
+    }
+
+    #[test]
+    fn test_router_resource_templates_filtered_with_disabled() {
+        let router = create_test_router();
+        let state = SessionState::new();
+
+        // All templates visible without filtering
+        let all_templates = router.resource_templates_filtered(None);
+        assert_eq!(all_templates.len(), 2);
+
+        // Disable a template by its URI template
+        let mut disabled: std::collections::HashSet<String> = std::collections::HashSet::new();
+        disabled.insert("resource://{id}".to_string());
+        state.set("fastmcp.disabled_resources", disabled);
+
+        // Now filtered list should have one less template
+        let filtered_templates = router.resource_templates_filtered(Some(&state));
+        assert_eq!(filtered_templates.len(), 1);
+        assert!(!filtered_templates
+            .iter()
+            .any(|t| t.uri_template == "resource://{id}"));
+        assert!(filtered_templates
+            .iter()
+            .any(|t| t.uri_template == "resource://{name}"));
+    }
+
     #[test]
     fn test_handle_resource_templates_list_sorted() {
         let router = create_test_router();
         let cx = Cx::for_testing();
         let params = ListResourceTemplatesParams { cursor: None };
 
-        let result = router.handle_resource_templates_list(&cx, params);
+        let result = router.handle_resource_templates_list(&cx, params, None);
         assert!(result.is_ok(), "Expected Ok, got Err: {:?}", result.err());
         let templates = result.unwrap().resource_templates;
 
@@ -1334,7 +1424,7 @@ mod router_tests {
         let params = ListResourceTemplatesParams { cursor: None };
 
         let result = router
-            .handle_resource_templates_list(&cx, params)
+            .handle_resource_templates_list(&cx, params, None)
             .expect("resource templates list");
 
         info!(

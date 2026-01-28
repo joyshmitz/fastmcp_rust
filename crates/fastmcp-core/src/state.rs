@@ -123,6 +123,71 @@ impl SessionState {
     }
 }
 
+// ============================================================================
+// Dynamic Component Enable/Disable Helpers
+// ============================================================================
+
+/// Session state key for disabled tools.
+pub const DISABLED_TOOLS_KEY: &str = "fastmcp.disabled_tools";
+/// Session state key for disabled resources.
+pub const DISABLED_RESOURCES_KEY: &str = "fastmcp.disabled_resources";
+/// Session state key for disabled prompts.
+pub const DISABLED_PROMPTS_KEY: &str = "fastmcp.disabled_prompts";
+
+impl SessionState {
+    /// Returns whether a tool is enabled (not disabled) for this session.
+    ///
+    /// Tools are enabled by default unless explicitly disabled.
+    #[must_use]
+    pub fn is_tool_enabled(&self, name: &str) -> bool {
+        !self.is_in_disabled_set(DISABLED_TOOLS_KEY, name)
+    }
+
+    /// Returns whether a resource is enabled (not disabled) for this session.
+    ///
+    /// Resources are enabled by default unless explicitly disabled.
+    #[must_use]
+    pub fn is_resource_enabled(&self, uri: &str) -> bool {
+        !self.is_in_disabled_set(DISABLED_RESOURCES_KEY, uri)
+    }
+
+    /// Returns whether a prompt is enabled (not disabled) for this session.
+    ///
+    /// Prompts are enabled by default unless explicitly disabled.
+    #[must_use]
+    pub fn is_prompt_enabled(&self, name: &str) -> bool {
+        !self.is_in_disabled_set(DISABLED_PROMPTS_KEY, name)
+    }
+
+    /// Returns the set of disabled tools.
+    #[must_use]
+    pub fn disabled_tools(&self) -> std::collections::HashSet<String> {
+        self.get::<std::collections::HashSet<String>>(DISABLED_TOOLS_KEY)
+            .unwrap_or_default()
+    }
+
+    /// Returns the set of disabled resources.
+    #[must_use]
+    pub fn disabled_resources(&self) -> std::collections::HashSet<String> {
+        self.get::<std::collections::HashSet<String>>(DISABLED_RESOURCES_KEY)
+            .unwrap_or_default()
+    }
+
+    /// Returns the set of disabled prompts.
+    #[must_use]
+    pub fn disabled_prompts(&self) -> std::collections::HashSet<String> {
+        self.get::<std::collections::HashSet<String>>(DISABLED_PROMPTS_KEY)
+            .unwrap_or_default()
+    }
+
+    // Helper: Check if a name is in a disabled set
+    fn is_in_disabled_set(&self, key: &str, name: &str) -> bool {
+        self.get::<std::collections::HashSet<String>>(key)
+            .map(|set| set.contains(name))
+            .unwrap_or(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +306,98 @@ mod tests {
         cloned.set("key2", "value2");
 
         assert!(state.contains("key2"));
+    }
+
+    // ========================================================================
+    // Dynamic Enable/Disable Tests
+    // ========================================================================
+
+    #[test]
+    fn test_is_tool_enabled_default() {
+        let state = SessionState::new();
+
+        // Tools are enabled by default
+        assert!(state.is_tool_enabled("any_tool"));
+        assert!(state.is_tool_enabled("another_tool"));
+    }
+
+    #[test]
+    fn test_is_tool_enabled_disabled() {
+        let state = SessionState::new();
+
+        // Manually disable a tool by setting the disabled set
+        let mut disabled: std::collections::HashSet<String> = std::collections::HashSet::new();
+        disabled.insert("my_tool".to_string());
+        state.set(super::DISABLED_TOOLS_KEY, disabled);
+
+        assert!(!state.is_tool_enabled("my_tool"));
+        assert!(state.is_tool_enabled("other_tool"));
+    }
+
+    #[test]
+    fn test_is_resource_enabled_default() {
+        let state = SessionState::new();
+
+        // Resources are enabled by default
+        assert!(state.is_resource_enabled("file://path"));
+        assert!(state.is_resource_enabled("http://example.com"));
+    }
+
+    #[test]
+    fn test_is_resource_enabled_disabled() {
+        let state = SessionState::new();
+
+        // Manually disable a resource
+        let mut disabled: std::collections::HashSet<String> = std::collections::HashSet::new();
+        disabled.insert("file://secret".to_string());
+        state.set(super::DISABLED_RESOURCES_KEY, disabled);
+
+        assert!(!state.is_resource_enabled("file://secret"));
+        assert!(state.is_resource_enabled("file://public"));
+    }
+
+    #[test]
+    fn test_is_prompt_enabled_default() {
+        let state = SessionState::new();
+
+        // Prompts are enabled by default
+        assert!(state.is_prompt_enabled("any_prompt"));
+    }
+
+    #[test]
+    fn test_is_prompt_enabled_disabled() {
+        let state = SessionState::new();
+
+        // Manually disable a prompt
+        let mut disabled: std::collections::HashSet<String> = std::collections::HashSet::new();
+        disabled.insert("admin_prompt".to_string());
+        state.set(super::DISABLED_PROMPTS_KEY, disabled);
+
+        assert!(!state.is_prompt_enabled("admin_prompt"));
+        assert!(state.is_prompt_enabled("user_prompt"));
+    }
+
+    #[test]
+    fn test_disabled_sets_return_empty_by_default() {
+        let state = SessionState::new();
+
+        assert!(state.disabled_tools().is_empty());
+        assert!(state.disabled_resources().is_empty());
+        assert!(state.disabled_prompts().is_empty());
+    }
+
+    #[test]
+    fn test_disabled_tools_returns_set() {
+        let state = SessionState::new();
+
+        let mut disabled: std::collections::HashSet<String> = std::collections::HashSet::new();
+        disabled.insert("tool1".to_string());
+        disabled.insert("tool2".to_string());
+        state.set(super::DISABLED_TOOLS_KEY, disabled);
+
+        let result = state.disabled_tools();
+        assert_eq!(result.len(), 2);
+        assert!(result.contains("tool1"));
+        assert!(result.contains("tool2"));
     }
 }
