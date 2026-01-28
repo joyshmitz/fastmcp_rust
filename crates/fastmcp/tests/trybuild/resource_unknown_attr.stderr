@@ -1,0 +1,5 @@
+error: unknown attribute
+ --> tests/trybuild/resource_unknown_attr.rs:5:33
+  |
+5 | #[resource(uri = "test://data", unknown = "value")]
+  |                                 ^^^^^^^

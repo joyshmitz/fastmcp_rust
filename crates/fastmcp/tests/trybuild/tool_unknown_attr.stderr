@@ -1,0 +1,5 @@
+error: unknown attribute
+ --> tests/trybuild/tool_unknown_attr.rs:5:8
+  |
+5 | #[tool(invalid_attr = "foo")]
+  |        ^^^^^^^^^^^^

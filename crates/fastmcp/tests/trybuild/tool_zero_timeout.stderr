@@ -1,0 +1,5 @@
+error: invalid timeout: duration must be greater than zero
+ --> tests/trybuild/tool_zero_timeout.rs:6:4
+  |
+6 | fn my_tool() -> String {
+  |    ^^^^^^^

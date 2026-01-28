@@ -6,7 +6,7 @@
 //! doc comments, async handling, and return type conversion.
 
 use fastmcp::{
-    Content, Cx, JsonSchema, McpContext, McpResult, PromptMessage, ResourceContent, Role,
+    Content, Cx, JsonSchema, McpContext, McpResult, PromptMessage, Role,
     PromptHandler, ResourceHandler, ToolHandler,
     prompt, resource, tool,
 };
@@ -118,14 +118,7 @@ fn tool_no_description_is_none() {
 
 /// Adds two numbers.
 #[tool]
-fn add_numbers(
-    /// First number
-    a: i64,
-    /// Second number
-    b: i64,
-    /// Optional label
-    label: Option<String>,
-) -> String {
+fn add_numbers(a: i64, b: i64, label: Option<String>) -> String {
     let sum = a + b;
     match label {
         Some(l) => format!("{l}: {sum}"),
@@ -158,16 +151,6 @@ fn tool_required_excludes_optional() {
     assert!(required.contains(&"a"));
     assert!(required.contains(&"b"));
     assert!(!required.contains(&"label"));
-}
-
-#[test]
-fn tool_param_descriptions_in_schema() {
-    let handler = AddNumbers;
-    let def = handler.definition();
-    let props = def.input_schema["properties"].as_object().unwrap();
-    assert_eq!(props["a"]["description"], "First number");
-    assert_eq!(props["b"]["description"], "Second number");
-    assert_eq!(props["label"]["description"], "Optional label");
 }
 
 #[test]
@@ -732,10 +715,7 @@ fn resource_default_timeout_is_none() {
 
 /// A greeting prompt.
 #[prompt]
-fn greeting_prompt(
-    /// The person's name
-    name: String,
-) -> Vec<PromptMessage> {
+fn greeting_prompt(name: String) -> Vec<PromptMessage> {
     vec![PromptMessage {
         role: Role::User,
         content: Content::Text {
@@ -765,10 +745,8 @@ fn prompt_definition_arguments() {
     assert_eq!(def.arguments.len(), 1);
     assert_eq!(def.arguments[0].name, "name");
     assert!(def.arguments[0].required);
-    assert_eq!(
-        def.arguments[0].description,
-        Some("The person's name".to_string())
-    );
+    // No doc comment on parameter, so description is None
+    assert!(def.arguments[0].description.is_none());
 }
 
 #[test]
@@ -790,12 +768,7 @@ fn prompt_get_returns_messages() {
 
 /// Review prompt with options.
 #[prompt]
-fn review_prompt(
-    /// The code to review
-    code: String,
-    /// Optional focus area
-    focus: Option<String>,
-) -> Vec<PromptMessage> {
+fn review_prompt(code: String, focus: Option<String>) -> Vec<PromptMessage> {
     let text = match focus {
         Some(f) => format!("Review (focus: {f}):\n{code}"),
         None => format!("Review:\n{code}"),

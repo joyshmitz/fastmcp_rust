@@ -1,0 +1,5 @@
+error: resource requires uri attribute
+ --> tests/trybuild/resource_missing_uri.rs:6:4
+  |
+6 | fn my_resource() -> String {
+  |    ^^^^^^^^^^^

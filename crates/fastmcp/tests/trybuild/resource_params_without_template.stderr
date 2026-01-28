@@ -1,0 +1,13 @@
+error: resource parameters require a URI template with matching {params}
+ --> tests/trybuild/resource_params_without_template.rs:6:4
+  |
+6 | fn my_resource(name: String) -> String {
+  |    ^^^^^^^^^^^
+
+warning: unused import: `McpContext`
+ --> tests/trybuild/resource_params_without_template.rs:3:15
+  |
+3 | use fastmcp::{McpContext, resource};
+  |               ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

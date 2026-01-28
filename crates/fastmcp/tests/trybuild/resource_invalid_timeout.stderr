@@ -1,0 +1,5 @@
+error: invalid timeout: unexpected unit character 'x' without preceding number
+ --> tests/trybuild/resource_invalid_timeout.rs:6:4
+  |
+6 | fn my_resource() -> String {
+  |    ^^^^^^^^^^^

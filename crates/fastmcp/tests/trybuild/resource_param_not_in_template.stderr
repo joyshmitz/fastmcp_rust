@@ -1,0 +1,5 @@
+error: resource parameters missing from uri template: extra
+ --> tests/trybuild/resource_param_not_in_template.rs:6:4
+  |
+6 | fn my_resource(path: String, extra: String) -> String {
+  |    ^^^^^^^^^^^

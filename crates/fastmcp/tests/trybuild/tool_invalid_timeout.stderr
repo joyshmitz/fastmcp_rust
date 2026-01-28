@@ -1,0 +1,5 @@
+error: invalid timeout: unexpected unit character 'i' without preceding number
+ --> tests/trybuild/tool_invalid_timeout.rs:6:4
+  |
+6 | fn my_tool() -> String {
+  |    ^^^^^^^
