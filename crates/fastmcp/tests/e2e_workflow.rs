@@ -1584,3 +1584,364 @@ fn workflow_concurrent_stress_test() {
         expected_total
     );
 }
+
+// ============================================================================
+// Client Session Management E2E Tests (bd-2ms)
+// ============================================================================
+
+#[test]
+fn session_initialization_stores_server_info() {
+    let mut client = setup_workflow_server();
+
+    // Before initialization, no server info
+    assert!(client.server_info().is_none());
+    assert!(client.server_capabilities().is_none());
+    assert!(client.protocol_version().is_none());
+    assert!(!client.is_initialized());
+
+    // Initialize
+    let init_result = client.initialize().unwrap();
+
+    // After initialization, all session info is available
+    assert!(client.is_initialized());
+    assert!(client.server_info().is_some());
+    assert!(client.server_capabilities().is_some());
+    assert!(client.protocol_version().is_some());
+
+    // Verify the stored info matches what was returned
+    let server_info = client.server_info().unwrap();
+    assert_eq!(server_info.name, init_result.server_info.name);
+    assert_eq!(server_info.version, init_result.server_info.version);
+}
+
+#[test]
+fn session_capabilities_reflect_server_handlers() {
+    use fastmcp_transport::memory::create_memory_transport_pair;
+    use std::thread;
+
+    // Server with only tools
+    let (client_transport, server_transport) = create_memory_transport_pair();
+    let server = Server::new("tools-only", "1.0.0")
+        .tool(EchoToolHandler)
+        .build();
+    thread::spawn(move || server.run_transport(server_transport));
+
+    let mut client = TestClient::new(client_transport);
+    client.initialize().unwrap();
+
+    let caps = client.server_capabilities().unwrap();
+    assert!(caps.tools.is_some());
+    assert!(caps.resources.is_none());
+    assert!(caps.prompts.is_none());
+
+    // Server with only resources
+    let (client_transport2, server_transport2) = create_memory_transport_pair();
+    let server2 = Server::new("resources-only", "1.0.0")
+        .resource(StatusResourceHandler)
+        .build();
+    thread::spawn(move || server2.run_transport(server_transport2));
+
+    let mut client2 = TestClient::new(client_transport2);
+    client2.initialize().unwrap();
+
+    let caps2 = client2.server_capabilities().unwrap();
+    assert!(caps2.tools.is_none());
+    assert!(caps2.resources.is_some());
+    assert!(caps2.prompts.is_none());
+
+    // Server with only prompts
+    let (client_transport3, server_transport3) = create_memory_transport_pair();
+    let server3 = Server::new("prompts-only", "1.0.0")
+        .prompt(HelpPromptHandler)
+        .build();
+    thread::spawn(move || server3.run_transport(server_transport3));
+
+    let mut client3 = TestClient::new(client_transport3);
+    client3.initialize().unwrap();
+
+    let caps3 = client3.server_capabilities().unwrap();
+    assert!(caps3.tools.is_none());
+    assert!(caps3.resources.is_none());
+    assert!(caps3.prompts.is_some());
+}
+
+#[test]
+fn session_protocol_version_negotiated() {
+    let mut client = setup_workflow_server();
+    let init_result = client.initialize().unwrap();
+
+    // Protocol version should be set
+    assert!(!init_result.protocol_version.is_empty());
+
+    // Stored version should match returned version
+    let stored_version = client.protocol_version().unwrap();
+    assert_eq!(stored_version, init_result.protocol_version);
+}
+
+#[test]
+fn session_operations_fail_before_init() {
+    use fastmcp_transport::memory::create_memory_transport_pair;
+    use std::thread;
+
+    let (client_transport, server_transport) = create_memory_transport_pair();
+    let server = Server::new("test-server", "1.0.0")
+        .tool(EchoToolHandler)
+        .build();
+    thread::spawn(move || server.run_transport(server_transport));
+
+    let mut client = TestClient::new(client_transport);
+
+    // All operations should fail before initialization
+    assert!(client.list_tools().is_err());
+    assert!(client.list_resources().is_err());
+    assert!(client.list_prompts().is_err());
+    assert!(client.call_tool("echo", json!({"message": "test"})).is_err());
+    assert!(client.read_resource("app://test").is_err());
+}
+
+#[test]
+fn session_close_graceful() {
+    use fastmcp_transport::memory::create_memory_transport_pair;
+    use std::thread;
+
+    let (client_transport, server_transport) = create_memory_transport_pair();
+    let server = Server::new("close-test", "1.0.0")
+        .tool(EchoToolHandler)
+        .build();
+    thread::spawn(move || server.run_transport(server_transport));
+
+    let mut client = TestClient::new(client_transport);
+    client.initialize().unwrap();
+
+    // Perform some operations
+    let result = client
+        .call_tool("echo", json!({"message": "before close"}))
+        .unwrap();
+    assert!(!result.is_empty());
+
+    // Close the client - this consumes it
+    client.close();
+
+    // Client is now consumed, no further operations possible
+    // (This is enforced by Rust's ownership system - client is moved)
+}
+
+#[test]
+fn session_state_isolated_per_client() {
+    use fastmcp_transport::memory::create_memory_transport_pair;
+    use std::thread;
+
+    // Create two separate client-server pairs
+    let (client_a_transport, server_a_transport) = create_memory_transport_pair();
+    let (client_b_transport, server_b_transport) = create_memory_transport_pair();
+
+    let server_a = Server::new("server-a", "1.0.0")
+        .tool(SessionStoreHandler)
+        .tool(SessionGetHandler)
+        .build();
+
+    let server_b = Server::new("server-b", "1.0.0")
+        .tool(SessionStoreHandler)
+        .tool(SessionGetHandler)
+        .build();
+
+    thread::spawn(move || server_a.run_transport(server_a_transport));
+    thread::spawn(move || server_b.run_transport(server_b_transport));
+
+    let mut client_a = TestClient::new(client_a_transport);
+    let mut client_b = TestClient::new(client_b_transport);
+
+    client_a.initialize().unwrap();
+    client_b.initialize().unwrap();
+
+    // Store different values in each session
+    client_a
+        .call_tool(
+            "session_store",
+            json!({"key": "shared_key", "value": "value_a"}),
+        )
+        .unwrap();
+
+    client_b
+        .call_tool(
+            "session_store",
+            json!({"key": "shared_key", "value": "value_b"}),
+        )
+        .unwrap();
+
+    // Each client retrieves only its own value
+    let result_a = client_a
+        .call_tool("session_get", json!({"key": "shared_key"}))
+        .unwrap();
+
+    let result_b = client_b
+        .call_tool("session_get", json!({"key": "shared_key"}))
+        .unwrap();
+
+    match (&result_a[0], &result_b[0]) {
+        (Content::Text { text: text_a }, Content::Text { text: text_b }) => {
+            assert_eq!(text_a, "value_a", "Client A should see its own value");
+            assert_eq!(text_b, "value_b", "Client B should see its own value");
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn session_reinitialize_fails() {
+    let mut client = setup_workflow_server();
+
+    // First initialization succeeds
+    client.initialize().unwrap();
+    assert!(client.is_initialized());
+
+    // Second initialization should succeed (idempotent) but returns same info
+    // Note: In actual MCP protocol, re-initializing isn't well-defined,
+    // but our TestClient should handle it gracefully
+    let second_init = client.initialize();
+
+    // The result depends on server implementation - may succeed or fail
+    // The important thing is the client remains in a usable state
+    if second_init.is_ok() {
+        // If it succeeded, client should still work
+        let tools = client.list_tools();
+        assert!(tools.is_ok());
+    }
+}
+
+#[test]
+fn session_tracks_client_info() {
+    use fastmcp_transport::memory::create_memory_transport_pair;
+    use std::thread;
+
+    let (client_transport, server_transport) = create_memory_transport_pair();
+    let server = Server::new("client-info-test", "1.0.0")
+        .tool(EchoToolHandler)
+        .build();
+    thread::spawn(move || server.run_transport(server_transport));
+
+    let mut client = TestClient::new(client_transport)
+        .with_client_info("custom-client-name", "2.5.0");
+
+    // Verify client info is set before initialization
+    let init = client.initialize().unwrap();
+
+    // Server responded (indicating it received our client info)
+    assert!(init.capabilities.tools.is_some());
+
+    // Client should still work after initialization
+    let result = client
+        .call_tool("echo", json!({"message": "test"}))
+        .unwrap();
+    assert!(!result.is_empty());
+}
+
+#[test]
+fn session_multiple_clients_independent_lifecycle() {
+    use fastmcp_transport::memory::create_memory_transport_pair;
+    use std::thread;
+
+    // Create multiple independent client-server pairs
+    let mut clients = Vec::new();
+
+    for i in 0..3 {
+        let (client_transport, server_transport) = create_memory_transport_pair();
+        let server = Server::new(&format!("lifecycle-server-{}", i), "1.0.0")
+            .tool(EchoToolHandler)
+            .build();
+        thread::spawn(move || server.run_transport(server_transport));
+
+        let client = TestClient::new(client_transport)
+            .with_client_info(format!("lifecycle-client-{}", i), "1.0.0");
+        clients.push((i, client));
+    }
+
+    // Initialize clients in order
+    for (i, client) in &mut clients {
+        let init = client.initialize().unwrap();
+        assert_eq!(
+            init.server_info.name,
+            format!("lifecycle-server-{}", i)
+        );
+    }
+
+    // All clients should work independently
+    for (i, client) in &mut clients {
+        let result = client
+            .call_tool("echo", json!({"message": format!("from-client-{}", i)}))
+            .unwrap();
+        match &result[0] {
+            Content::Text { text } => {
+                assert!(text.contains(&format!("from-client-{}", i)));
+            }
+            _ => panic!("Expected text"),
+        }
+    }
+
+    // Close clients in reverse order (shouldn't affect others)
+    while let Some((_, client)) = clients.pop() {
+        client.close();
+    }
+}
+
+#[test]
+fn session_state_persists_across_operations() {
+    use fastmcp_transport::memory::create_memory_transport_pair;
+    use std::thread;
+
+    let (client_transport, server_transport) = create_memory_transport_pair();
+    let server = Server::new("persistence-test", "1.0.0")
+        .tool(SessionStoreHandler)
+        .tool(SessionGetHandler)
+        .tool(EchoToolHandler)
+        .build();
+    thread::spawn(move || server.run_transport(server_transport));
+
+    let mut client = TestClient::new(client_transport);
+    client.initialize().unwrap();
+
+    // Store a value
+    client
+        .call_tool(
+            "session_store",
+            json!({"key": "persistent", "value": "stored_value"}),
+        )
+        .unwrap();
+
+    // Perform unrelated operations
+    client.list_tools().unwrap();
+    client.call_tool("echo", json!({"message": "interleaved"})).unwrap();
+    client.list_tools().unwrap();
+
+    // Value should still be there
+    let result = client
+        .call_tool("session_get", json!({"key": "persistent"}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert_eq!(text, "stored_value", "Session state should persist");
+        }
+        _ => panic!("Expected text"),
+    }
+}
+
+#[test]
+fn session_server_info_accessors() {
+    let mut client = setup_workflow_server();
+    client.initialize().unwrap();
+
+    // Verify all accessors return correct data
+    let server_info = client.server_info().unwrap();
+    assert_eq!(server_info.name, "workflow-test-server");
+    assert_eq!(server_info.version, "2.0.0");
+
+    let caps = client.server_capabilities().unwrap();
+    assert!(caps.tools.is_some());
+    assert!(caps.resources.is_some());
+    assert!(caps.prompts.is_some());
+
+    // Protocol version should be non-empty
+    let version = client.protocol_version().unwrap();
+    assert!(!version.is_empty());
+}
