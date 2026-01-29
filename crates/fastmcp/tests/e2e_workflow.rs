@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use fastmcp::testing::prelude::*;
 use fastmcp::{
     McpContext, McpResult, PromptHandler, PromptMessage, Resource, ResourceContent,
-    ResourceHandler, ResourceTemplate, Role, ToolHandler,
+    ResourceHandler, ResourceTemplate, Role, Server, ToolHandler,
 };
 use fastmcp_protocol::{Prompt, PromptArgument, Tool, ToolAnnotations};
 use serde_json::json;
@@ -1184,6 +1184,10 @@ impl ToolHandler for SessionStoreHandler {
                 },
                 "required": ["key", "value"]
             }),
+            output_schema: None,
+            icon: None,
+            version: None,
+            tags: vec![],
             annotations: None,
         }
     }
@@ -1199,7 +1203,9 @@ impl ToolHandler for SessionStoreHandler {
         // Store value in session state
         ctx.set_state(&key, value.clone());
 
-        Ok(vec![Content::text(format!("Stored: {key}={value}"))])
+        Ok(vec![Content::Text {
+            text: format!("Stored: {key}={value}"),
+        }])
     }
 }
 
@@ -1218,6 +1224,10 @@ impl ToolHandler for SessionGetHandler {
                 },
                 "required": ["key"]
             }),
+            output_schema: None,
+            icon: None,
+            version: None,
+            tags: vec![],
             annotations: None,
         }
     }
@@ -1232,76 +1242,10 @@ impl ToolHandler for SessionGetHandler {
         let value: Option<String> = ctx.get_state(key);
         let result = value.unwrap_or_else(|| "NOT_FOUND".to_string());
 
-        Ok(vec![Content::text(result)])
+        Ok(vec![Content::Text { text: result }])
     }
 }
 
-/// Tool that returns a unique client identifier based on the request.
-struct ClientIdHandler {
-    counter: std::sync::atomic::AtomicU64,
-}
-
-impl ClientIdHandler {
-    fn new() -> Self {
-        Self {
-            counter: std::sync::atomic::AtomicU64::new(0),
-        }
-    }
-}
-
-impl ToolHandler for ClientIdHandler {
-    fn definition(&self) -> Tool {
-        Tool {
-            name: "get_client_id".to_string(),
-            description: Some("Get a unique identifier for this client session".to_string()),
-            input_schema: json!({
-                "type": "object",
-                "properties": {}
-            }),
-            annotations: None,
-        }
-    }
-
-    fn call(
-        &self,
-        ctx: &McpContext,
-        _arguments: serde_json::Value,
-    ) -> McpResult<Vec<Content>> {
-        // Check if we already have a client ID in session state
-        let client_id: Option<u64> = ctx.get_state("_client_id");
-        let id = match client_id {
-            Some(id) => id,
-            None => {
-                let id = self.counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                ctx.set_state("_client_id", id);
-                id
-            }
-        };
-
-        Ok(vec![Content::text(id.to_string())])
-    }
-}
-
-/// Helper to create multiple client-server pairs sharing a common server.
-fn setup_concurrent_server() -> (Arc<fastmcp_server::Server>, Vec<(MemoryTransport, MemoryTransport)>) {
-    use fastmcp_transport::memory::create_memory_transport_pair;
-
-    let server = Server::new("concurrent-test-server", "1.0.0")
-        .tool(EchoToolHandler)
-        .tool(SessionStoreHandler)
-        .tool(SessionGetHandler)
-        .tool(ClientIdHandler::new())
-        .build();
-
-    let server = Arc::new(server);
-
-    // Create 5 transport pairs
-    let transports: Vec<_> = (0..5)
-        .map(|_| create_memory_transport_pair())
-        .collect();
-
-    (server, transports)
-}
 
 use std::sync::Arc;
 use fastmcp_transport::memory::MemoryTransport;
