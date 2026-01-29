@@ -1945,3 +1945,574 @@ fn session_server_info_accessors() {
     let version = client.protocol_version().unwrap();
     assert!(!version.is_empty());
 }
+
+// ============================================================================
+// Tool Invocation E2E Tests (bd-3vh)
+// ============================================================================
+
+/// Tool that accepts various argument types for testing.
+struct TypesToolHandler;
+
+impl ToolHandler for TypesToolHandler {
+    fn definition(&self) -> Tool {
+        Tool {
+            name: "types_test".to_string(),
+            description: Some("Tests various argument types".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "string_val": { "type": "string" },
+                    "int_val": { "type": "integer" },
+                    "float_val": { "type": "number" },
+                    "bool_val": { "type": "boolean" },
+                    "array_val": { "type": "array", "items": { "type": "string" } },
+                    "object_val": { "type": "object" },
+                    "null_val": { "type": "null" }
+                },
+                "required": []
+            }),
+            output_schema: None,
+            icon: None,
+            version: None,
+            tags: vec![],
+            annotations: None,
+        }
+    }
+
+    fn call(&self, _ctx: &McpContext, arguments: serde_json::Value) -> McpResult<Vec<Content>> {
+        // Echo back the type of each provided value
+        let mut result = Vec::new();
+
+        if let Some(v) = arguments.get("string_val") {
+            result.push(format!("string_val: {}", v.as_str().unwrap_or("(not string)")));
+        }
+        if let Some(v) = arguments.get("int_val") {
+            result.push(format!("int_val: {}", v.as_i64().map(|n| n.to_string()).unwrap_or("(not int)".to_string())));
+        }
+        if let Some(v) = arguments.get("float_val") {
+            result.push(format!("float_val: {}", v.as_f64().map(|n| n.to_string()).unwrap_or("(not float)".to_string())));
+        }
+        if let Some(v) = arguments.get("bool_val") {
+            result.push(format!("bool_val: {}", v.as_bool().map(|b| b.to_string()).unwrap_or("(not bool)".to_string())));
+        }
+        if let Some(v) = arguments.get("array_val") {
+            let arr_len = v.as_array().map(|a| a.len()).unwrap_or(0);
+            result.push(format!("array_val: [len={}]", arr_len));
+        }
+        if let Some(v) = arguments.get("object_val") {
+            let obj_keys = v.as_object().map(|o| o.len()).unwrap_or(0);
+            result.push(format!("object_val: {{keys={}}}", obj_keys));
+        }
+        if arguments.get("null_val").map(|v| v.is_null()).unwrap_or(false) {
+            result.push("null_val: null".to_string());
+        }
+
+        if result.is_empty() {
+            result.push("(no arguments provided)".to_string());
+        }
+
+        Ok(vec![Content::Text {
+            text: result.join(", "),
+        }])
+    }
+}
+
+/// Tool that requires specific arguments for validation testing.
+struct RequiredArgsToolHandler;
+
+impl ToolHandler for RequiredArgsToolHandler {
+    fn definition(&self) -> Tool {
+        Tool {
+            name: "required_args".to_string(),
+            description: Some("Tool with required arguments".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "required_field": { "type": "string" },
+                    "optional_field": { "type": "string" }
+                },
+                "required": ["required_field"]
+            }),
+            output_schema: None,
+            icon: None,
+            version: None,
+            tags: vec![],
+            annotations: None,
+        }
+    }
+
+    fn call(&self, _ctx: &McpContext, arguments: serde_json::Value) -> McpResult<Vec<Content>> {
+        let required = arguments["required_field"]
+            .as_str()
+            .ok_or_else(|| McpError::invalid_params("required_field is required"))?;
+
+        let optional = arguments["optional_field"].as_str().unwrap_or("(not provided)");
+
+        Ok(vec![Content::Text {
+            text: format!("required: {}, optional: {}", required, optional),
+        }])
+    }
+}
+
+/// Tool that returns multiple content items.
+struct MultiContentToolHandler;
+
+impl ToolHandler for MultiContentToolHandler {
+    fn definition(&self) -> Tool {
+        Tool {
+            name: "multi_content".to_string(),
+            description: Some("Returns multiple content items".to_string()),
+            input_schema: json!({"type": "object", "properties": {"count": {"type": "integer"}}}),
+            output_schema: None,
+            icon: None,
+            version: None,
+            tags: vec![],
+            annotations: None,
+        }
+    }
+
+    fn call(&self, _ctx: &McpContext, arguments: serde_json::Value) -> McpResult<Vec<Content>> {
+        let count = arguments["count"].as_i64().unwrap_or(1) as usize;
+        let count = count.min(10); // Limit to 10
+
+        (0..count)
+            .map(|i| Content::Text {
+                text: format!("Item {}", i + 1),
+            })
+            .collect::<Vec<_>>()
+            .pipe(Ok)
+    }
+}
+
+// Helper trait for pipe operator
+trait Pipe: Sized {
+    fn pipe<F, R>(self, f: F) -> R
+    where
+        F: FnOnce(Self) -> R,
+    {
+        f(self)
+    }
+}
+
+impl<T> Pipe for T {}
+
+fn setup_tool_test_server() -> TestClient {
+    let (builder, client_transport, server_transport) = TestServer::builder()
+        .with_name("tool-test-server")
+        .with_version("1.0.0")
+        .build_server_builder();
+
+    let server = builder
+        .tool(EchoToolHandler)
+        .tool(TypesToolHandler)
+        .tool(RequiredArgsToolHandler)
+        .tool(MultiContentToolHandler)
+        .tool(FailOnDemandToolHandler)
+        .build();
+
+    std::thread::spawn(move || {
+        server.run_transport(server_transport);
+    });
+
+    TestClient::new(client_transport)
+}
+
+#[test]
+fn tool_call_string_argument() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("types_test", json!({"string_val": "hello world"}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("string_val: hello world"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_integer_argument() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("types_test", json!({"int_val": 42}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("int_val: 42"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_float_argument() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("types_test", json!({"float_val": 3.14159}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("float_val: 3.14159"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_boolean_argument() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("types_test", json!({"bool_val": true}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("bool_val: true"));
+        }
+        _ => panic!("Expected text content"),
+    }
+
+    let result = client
+        .call_tool("types_test", json!({"bool_val": false}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("bool_val: false"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_array_argument() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("types_test", json!({"array_val": ["a", "b", "c"]}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("array_val: [len=3]"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_object_argument() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("types_test", json!({"object_val": {"key1": "val1", "key2": "val2"}}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("object_val: {keys=2}"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_null_argument() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("types_test", json!({"null_val": null}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("null_val: null"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_multiple_argument_types() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("types_test", json!({
+            "string_val": "test",
+            "int_val": 100,
+            "bool_val": true,
+            "array_val": [1, 2, 3]
+        }))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("string_val: test"));
+            assert!(text.contains("int_val: 100"));
+            assert!(text.contains("bool_val: true"));
+            assert!(text.contains("array_val: [len=3]"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_empty_arguments() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client.call_tool("types_test", json!({})).unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("(no arguments provided)"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_required_argument_provided() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("required_args", json!({"required_field": "value123"}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("required: value123"));
+            assert!(text.contains("optional: (not provided)"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_required_and_optional_arguments() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("required_args", json!({
+            "required_field": "required_value",
+            "optional_field": "optional_value"
+        }))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("required: required_value"));
+            assert!(text.contains("optional: optional_value"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_missing_required_argument() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client.call_tool("required_args", json!({"optional_field": "only optional"}));
+
+    assert!(result.is_err(), "Should fail when required argument is missing");
+}
+
+#[test]
+fn tool_call_returns_multiple_content() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("multi_content", json!({"count": 3}))
+        .unwrap();
+
+    assert_eq!(result.len(), 3, "Should return 3 content items");
+
+    for (i, content) in result.iter().enumerate() {
+        match content {
+            Content::Text { text } => {
+                assert_eq!(text, &format!("Item {}", i + 1));
+            }
+            _ => panic!("Expected text content"),
+        }
+    }
+}
+
+#[test]
+fn tool_call_error_returns_mcp_error() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client.call_tool("fail_on_demand", json!({"fail": true, "message": "test error"}));
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.message.contains("test error") || err.message.contains("Requested failure"));
+}
+
+#[test]
+fn tool_call_nonexistent_tool_error() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client.call_tool("nonexistent_tool", json!({}));
+
+    assert!(result.is_err(), "Calling nonexistent tool should fail");
+}
+
+#[test]
+fn tool_call_unicode_arguments() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("echo", json!({"message": "こんにちは世界 🌍 مرحبا"}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert_eq!(text, "こんにちは世界 🌍 مرحبا");
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_special_characters() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("echo", json!({"message": "Line 1\nLine 2\tTabbed \"quoted\" 'single'"}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("Line 1"));
+            assert!(text.contains("Line 2"));
+            assert!(text.contains("quoted"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_large_string_argument() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let large_string = "x".repeat(10_000);
+    let result = client
+        .call_tool("echo", json!({"message": &large_string}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert_eq!(text.len(), 10_000);
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_nested_object_argument() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("types_test", json!({
+            "object_val": {
+                "level1": {
+                    "level2": {
+                        "level3": "deep value"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("object_val: {keys=1}"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_negative_numbers() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    let result = client
+        .call_tool("types_test", json!({"int_val": -42, "float_val": -3.14}))
+        .unwrap();
+
+    match &result[0] {
+        Content::Text { text } => {
+            assert!(text.contains("int_val: -42"));
+            assert!(text.contains("float_val: -3.14"));
+        }
+        _ => panic!("Expected text content"),
+    }
+}
+
+#[test]
+fn tool_call_sequential_success() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    // Call multiple tools in sequence
+    for i in 0..10 {
+        let result = client
+            .call_tool("echo", json!({"message": format!("call_{}", i)}))
+            .unwrap();
+
+        match &result[0] {
+            Content::Text { text } => {
+                assert_eq!(text, &format!("call_{}", i));
+            }
+            _ => panic!("Expected text content"),
+        }
+    }
+}
+
+#[test]
+fn tool_call_alternating_success_failure() {
+    let mut client = setup_tool_test_server();
+    client.initialize().unwrap();
+
+    for i in 0..6 {
+        let should_fail = i % 2 == 1;
+        let result = client.call_tool("fail_on_demand", json!({"fail": should_fail}));
+
+        if should_fail {
+            assert!(result.is_err(), "Iteration {} should fail", i);
+        } else {
+            assert!(result.is_ok(), "Iteration {} should succeed", i);
+        }
+    }
+
+    // Verify client is still functional after alternating failures
+    let tools = client.list_tools().unwrap();
+    assert!(!tools.is_empty());
+}
