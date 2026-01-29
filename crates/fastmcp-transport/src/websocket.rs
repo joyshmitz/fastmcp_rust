@@ -1351,6 +1351,7 @@ mod tests {
         // Verify responses were written (unmasked for server -> client)
         assert!(!response_buffer.is_empty());
         // Each response should be a separate text frame
+        #[allow(clippy::naive_bytecount)]
         let frame_count = response_buffer
             .iter()
             .filter(|&&b| b == 0x81) // FIN + Text opcode
@@ -1367,9 +1368,9 @@ mod tests {
 
         let mut buffer = Vec::new();
         // First fragment (FIN=0, opcode=Text)
-        buffer.extend(build_masked_frame(0x01, false, full_msg[..mid].as_bytes()));
+        buffer.extend(build_masked_frame(0x01, false, &full_msg.as_bytes()[..mid]));
         // Continuation fragment (FIN=1, opcode=Continuation)
-        buffer.extend(build_masked_frame(0x00, true, full_msg[mid..].as_bytes()));
+        buffer.extend(build_masked_frame(0x00, true, &full_msg.as_bytes()[mid..]));
 
         let cx = Cx::for_testing();
         let writer: Vec<u8> = Vec::new();
